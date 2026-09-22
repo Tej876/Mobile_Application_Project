@@ -14,6 +14,8 @@ class LiveStatusScreen extends StatefulWidget {
 }
 
 class _LiveStatusScreenState extends State<LiveStatusScreen> {
+  int? _lastNotifiedPosition;
+
   @override
   void initState() {
     super.initState();
@@ -28,6 +30,26 @@ class _LiveStatusScreenState extends State<LiveStatusScreen> {
         body: 'You are now 3rd in line.',
       );
       Provider.of<QueueProvider>(context, listen: false).updateNotifiedAt(widget.departmentId, tokenId);
+    }
+
+    if (position == 2 && _lastNotifiedPosition != 2) {
+      _lastNotifiedPosition = 2;
+      
+      NotificationService().showNotification(
+        id: tokenId.hashCode + 1,
+        title: 'Almost there!',
+        body: 'You are now 2nd in line. Please stay nearby.',
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('You are now 2nd in line!'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 4),
+          )
+        );
+      }
     }
   }
 
@@ -93,9 +115,10 @@ class _LiveStatusScreenState extends State<LiveStatusScreen> {
             );
           }
           
-          // Current position is tracked by Provider
-          final position = queue.currentPatientPosition;
-          final waitTime = (position * dept.avgConsultationMins) + 5;
+          // Current position is tracked by Provider (which is now exactly the tokenNumber)
+          final position = token.tokenNumber;
+          final peopleAhead = position > 0 ? position - 1 : 0;
+          final waitTime = (peopleAhead * dept.avgConsultationMins) + 5;
           
           // Post-frame callback for notification to avoid build during build
           WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -150,7 +173,7 @@ class _LiveStatusScreenState extends State<LiveStatusScreen> {
                         children: [
                           const Text('YOUR TOKEN', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold)),
                           Text('#${token.tokenNumber}', style: const TextStyle(fontSize: 48, fontWeight: FontWeight.bold)),
-                          Text(position > 0 ? '$position ahead of you' : 'You are next!', style: const TextStyle(color: Colors.grey)),
+                          Text(peopleAhead > 0 ? '$peopleAhead ahead of you' : 'You are next!', style: const TextStyle(color: Colors.grey)),
                         ],
                       ),
                     ),
@@ -165,7 +188,7 @@ class _LiveStatusScreenState extends State<LiveStatusScreen> {
                           children: [
                             const Text('NOW SERVING', style: TextStyle(color: Colors.grey)),
                             const SizedBox(height: 8),
-                            Text(position > 0 ? '#${token.tokenNumber - position}' : '-', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+                            Text(peopleAhead > 0 ? '#1' : '-', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
                           ],
                         ),
                       ),
@@ -175,7 +198,7 @@ class _LiveStatusScreenState extends State<LiveStatusScreen> {
                           children: [
                             const Text('EST. WAIT', style: TextStyle(color: Colors.grey)),
                             const SizedBox(height: 8),
-                            Text(position > 0 ? '~$waitTime mins' : 'Now', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+                            Text(peopleAhead > 0 ? '~$waitTime mins' : 'Now', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
                           ],
                         ),
                       ),

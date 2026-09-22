@@ -13,8 +13,7 @@ class QueueProvider extends ChangeNotifier {
   QueueToken? _currentPatientToken;
   QueueToken? get currentPatientToken => _currentPatientToken;
 
-  int _currentPatientPosition = 0;
-  int get currentPatientPosition => _currentPatientPosition;
+
   
   List<QueueToken> _adminQueue = [];
   List<QueueToken> get adminQueue => _adminQueue;
@@ -27,7 +26,38 @@ class QueueProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final snapshot = await _firestore.collection('departments').get();
+      var snapshot = await _firestore.collection('departments').get();
+
+      // Seed common departments if they don't exist
+      if (snapshot.docs.length < 6) {
+        final existingNames = snapshot.docs.map((d) => d.data()['name'] as String? ?? '').toList();
+        final standardDepts = [
+          {'name': 'General Medicine', 'avgConsultationMins': 15},
+          {'name': 'Cardiology', 'avgConsultationMins': 20},
+          {'name': 'Orthopedics', 'avgConsultationMins': 25},
+          {'name': 'Pediatrics', 'avgConsultationMins': 15},
+          {'name': 'Dermatology', 'avgConsultationMins': 10},
+          {'name': 'Neurology', 'avgConsultationMins': 30},
+        ];
+        
+        final batch = _firestore.batch();
+        bool addedAny = false;
+        
+        for (var dept in standardDepts) {
+          if (!existingNames.any((name) => name.toLowerCase() == (dept['name'] as String).toLowerCase())) {
+            final doc = _firestore.collection('departments').doc();
+            batch.set(doc, dept);
+            addedAny = true;
+          }
+        }
+        
+        if (addedAny) {
+          await batch.commit();
+          // Refetch after adding
+          snapshot = await _firestore.collection('departments').get();
+        }
+      }
+
       _departments = snapshot.docs
           .map((doc) => Department.fromMap(doc.data(), doc.id))
           .toList();
@@ -58,13 +88,9 @@ class QueueProvider extends ChangeNotifier {
         return; // Patient already in queue, just return
       }
 
-      // Find the max token number
-      final snapshot = await queueRef.orderBy('tokenNumber', descending: true).limit(1).get();
+      final snapshot = await queueRef.where('status', whereIn: ['waiting', 'called']).get();
       
-      int nextTokenNumber = 1;
-      if (snapshot.docs.isNotEmpty) {
-        nextTokenNumber = (snapshot.docs.first.data()['tokenNumber'] ?? 0) + 1;
-      }
+      int nextTokenNumber = snapshot.docs.length + 1;
 
       final newTokenRef = queueRef.doc();
       final newToken = QueueToken(
@@ -110,7 +136,6 @@ class QueueProvider extends ChangeNotifier {
         });
         
         _currentPatientToken = QueueToken.fromMap(activeDocs.first.data(), activeDocs.first.id);
-        _calculatePatientPosition(departmentId);
         return _currentPatientToken;
       }
       _currentPatientToken = null;
@@ -118,30 +143,30 @@ class QueueProvider extends ChangeNotifier {
     });
   }
   
-  void _calculatePatientPosition(String departmentId) async {
-    if (_currentPatientToken == null) return;
-    try {
-      final snapshot = await _firestore
-          .collection('departments')
-          .doc(departmentId)
-          .collection('queue')
-          .get();
-          
-      int pos = 0;
-      for (var doc in snapshot.docs) {
-        final data = doc.data();
-        final status = data['status'] as String?;
-        final tNum = data['tokenNumber'] as int? ?? 0;
-        
-        if ((status == 'waiting' || status == 'called') && tNum <= _currentPatientToken!.tokenNumber) {
-          pos++;
-        }
+
+
+  Future<void> _recalculateTokenNumbers(String departmentId, {String? excludeTokenId, WriteBatch? batch}) async {
+    final queueRef = _firestore.collection('departments').doc(departmentId).collection('queue');
+    final snapshot = await queueRef.where('status', whereIn: ['waiting', 'called']).get();
+    
+    final docs = snapshot.docs.where((doc) => doc.id != excludeTokenId).toList();
+    docs.sort((a, b) {
+      final aDate = (a.data()['joinedAt'] as Timestamp?)?.toDate() ?? DateTime.now();
+      final bDate = (b.data()['joinedAt'] as Timestamp?)?.toDate() ?? DateTime.now();
+      return aDate.compareTo(bDate);
+    });
+
+    final commitBatch = batch ?? _firestore.batch();
+    int currentToken = 1;
+    for (var doc in docs) {
+      if (doc.data()['tokenNumber'] != currentToken) {
+        commitBatch.update(doc.reference, {'tokenNumber': currentToken});
       }
-      
-      _currentPatientPosition = pos;
-      notifyListeners();
-    } catch(e) {
-      debugPrint("Error calculating position: $e");
+      currentToken++;
+    }
+    
+    if (batch == null) {
+      await commitBatch.commit();
     }
   }
 
@@ -161,6 +186,9 @@ class QueueProvider extends ChangeNotifier {
         'action': 'cancelled',
         'timestamp': FieldValue.serverTimestamp(),
       });
+      
+      // 3. Recalculate remaining tokens
+      await _recalculateTokenNumbers(departmentId, excludeTokenId: tokenId, batch: batch);
       
       await batch.commit();
       _currentPatientToken = null;
@@ -248,6 +276,9 @@ class QueueProvider extends ChangeNotifier {
         'action': status,
         'timestamp': FieldValue.serverTimestamp(),
       });
+      
+      // Recalculate remaining tokens
+      await _recalculateTokenNumbers(departmentId, excludeTokenId: token.id, batch: batch);
       
       await batch.commit();
     } catch(e) {

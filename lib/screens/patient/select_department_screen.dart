@@ -34,6 +34,12 @@ class _SelectDepartmentScreenState extends State<SelectDepartmentScreen> {
         foregroundColor: Theme.of(context).primaryColor,
         actions: [
           IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: () {
+              Provider.of<QueueProvider>(context, listen: false).fetchDepartments();
+            },
+          ),
+          IconButton(
             icon: const Icon(Icons.logout),
             onPressed: () async {
               await auth.logout();
