@@ -20,6 +20,20 @@ class NotificationService {
     );
     
     await _flutterLocalNotificationsPlugin.initialize(settings: initializationSettings);
+
+    // Request permissions for Android 13+ and iOS
+    final androidImplementation = _flutterLocalNotificationsPlugin
+        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+    if (androidImplementation != null) {
+      await androidImplementation.requestNotificationsPermission();
+    }
+
+    final iosImplementation = _flutterLocalNotificationsPlugin
+        .resolvePlatformSpecificImplementation<IOSFlutterLocalNotificationsPlugin>();
+    if (iosImplementation != null) {
+      await iosImplementation.requestPermissions(alert: true, badge: true, sound: true);
+    }
+
     _isInitialized = true;
   }
 

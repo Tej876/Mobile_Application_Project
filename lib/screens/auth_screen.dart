@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../providers/auth_provider.dart';
+import '../../providers/queue_provider.dart';
 import 'patient/select_department_screen.dart';
+import 'patient/live_status_screen.dart';
 import 'admin/dashboard_screen.dart';
 
 class AuthScreen extends StatefulWidget {
@@ -59,9 +61,20 @@ class _AuthScreenState extends State<AuthScreen> {
             MaterialPageRoute(builder: (_) => const AdminDashboardScreen()),
           );
         } else {
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute(builder: (_) => const SelectDepartmentScreen()),
-          );
+          final queue = Provider.of<QueueProvider>(context, listen: false);
+          final active = await queue.findActivePatientToken(auth.currentUser!.uid);
+          if (!mounted) return;
+          if (active != null) {
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(
+                builder: (_) => LiveStatusScreen(departmentId: active['departmentId']),
+              ),
+            );
+          } else {
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(builder: (_) => const SelectDepartmentScreen()),
+            );
+          }
         }
       }
     } catch (e) {

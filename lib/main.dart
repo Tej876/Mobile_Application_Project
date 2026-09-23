@@ -6,6 +6,7 @@ import 'providers/queue_provider.dart';
 import 'theme/app_theme.dart';
 import 'screens/splash_screen.dart';
 
+import 'services/notification_service.dart';
 import 'firebase_options.dart';
 
 void main() async {
@@ -17,6 +18,12 @@ void main() async {
     );
   } catch (e) {
     debugPrint("Firebase init failed: $e. Did you run flutterfire configure?");
+  }
+
+  try {
+    await NotificationService().init();
+  } catch (e) {
+    debugPrint("Notification init failed: $e");
   }
 
   runApp(

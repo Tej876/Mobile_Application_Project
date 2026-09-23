@@ -105,7 +105,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   Widget _buildQueueView(QueueProvider queue) {
     return StreamBuilder<List<QueueToken>>(
       stream: queue.listenToAdminQueue(_selectedDepartmentId!),
-      builder: (context, snapshot) {
+      builder: (streamCtx, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
         }
@@ -136,12 +136,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                       padding: const EdgeInsets.all(16),
                       itemBuilder: (context, index) {
                         final token = tokens[index];
+                        final isCalled = token.status == 'called';
+
                         return Card(
                           margin: const EdgeInsets.only(bottom: 12),
                           shape: RoundedRectangleBorder(
                             side: BorderSide(
-                              color: token.status == 'called'
-                                  ? Theme.of(context).primaryColor
+                              color: isCalled
+                                  ? Colors.green
                                   : Colors.transparent,
                               width: 2,
                             ),
@@ -154,8 +156,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                 Container(
                                   padding: const EdgeInsets.all(12),
                                   decoration: BoxDecoration(
-                                    color: Theme.of(context).primaryColor
-                                        .withValues(alpha: 0.1),
+                                    color: isCalled
+                                        ? Colors.green.withValues(alpha: 0.1)
+                                        : Theme.of(context).primaryColor
+                                            .withValues(alpha: 0.1),
                                     borderRadius: BorderRadius.circular(12),
                                   ),
                                   child: Text(
@@ -163,7 +167,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                     style: TextStyle(
                                       fontWeight: FontWeight.bold,
                                       fontSize: 18,
-                                      color: Theme.of(context).primaryColor,
+                                      color: isCalled
+                                          ? Colors.green.shade800
+                                          : Theme.of(context).primaryColor,
                                     ),
                                   ),
                                 ),
@@ -184,7 +190,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                       Text(
                                         'Status: ${token.status.toUpperCase()}',
                                         style: TextStyle(
-                                          color: token.status == 'called'
+                                          color: isCalled
                                               ? Colors.green
                                               : Colors.grey,
                                           fontWeight: FontWeight.bold,
@@ -194,7 +200,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                     ],
                                   ),
                                 ),
-                                if (token.status == 'called') ...[
+                                if (isCalled) ...[
                                   OutlinedButton(
                                     onPressed: () => queue.markTokenDone(
                                       _selectedDepartmentId!,

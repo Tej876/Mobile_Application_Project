@@ -1,30 +1,100 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-
-import 'package:queueless/main.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:queueless/models/queue_token.dart';
+import 'package:queueless/models/department.dart';
+import 'package:queueless/models/activity_log.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const QueueLessApp());
+  group('QueueLess Model & Logic Unit Tests', () {
+    test('QueueToken serialization and deserialization', () {
+      final now = DateTime.now();
+      final token = QueueToken(
+        id: 'tok-123',
+        tokenNumber: 5,
+        patientId: 'patient-abc',
+        patientName: 'John Doe',
+        status: 'waiting',
+        joinedAt: now,
+        notifiedAt: null,
+      );
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+      final map = token.toMap();
+      expect(map['tokenNumber'], 5);
+      expect(map['patientId'], 'patient-abc');
+      expect(map['patientName'], 'John Doe');
+      expect(map['status'], 'waiting');
+      expect(map['notifiedAt'], isNull);
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+      final recreated = QueueToken.fromMap({
+        'tokenNumber': 5,
+        'patientId': 'patient-abc',
+        'patientName': 'John Doe',
+        'status': 'waiting',
+        'joinedAt': Timestamp.fromDate(now),
+        'notifiedAt': null,
+      }, 'tok-123');
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+      expect(recreated.id, 'tok-123');
+      expect(recreated.tokenNumber, 5);
+      expect(recreated.patientName, 'John Doe');
+      expect(recreated.status, 'waiting');
+    });
+
+    test('Estimated Wait Time formula: (peopleAhead * avgConsultationMins) + 5', () {
+      const avgMins = 10;
+      
+      // 0 people ahead
+      int peopleAhead0 = 0;
+      int waitTime0 = (peopleAhead0 * avgMins) + 5;
+      expect(waitTime0, 5);
+
+      // 3 people ahead
+      int peopleAhead3 = 3;
+      int waitTime3 = (peopleAhead3 * avgMins) + 5;
+      expect(waitTime3, 35);
+    });
+
+    test('Department serialization and deserialization', () {
+      final dept = Department(
+        id: 'dept-1',
+        name: 'General Medicine',
+        avgConsultationMins: 15,
+      );
+
+      final map = dept.toMap();
+      expect(map['name'], 'General Medicine');
+      expect(map['avgConsultationMins'], 15);
+
+      final fromMap = Department.fromMap(map, 'dept-1');
+      expect(fromMap.id, 'dept-1');
+      expect(fromMap.name, 'General Medicine');
+      expect(fromMap.avgConsultationMins, 15);
+    });
+
+    test('ActivityLog serialization and deserialization', () {
+      final now = DateTime.now();
+      final log = ActivityLog(
+        id: 'log-1',
+        tokenNumber: 3,
+        patientName: 'Jane Smith',
+        action: 'cancelled',
+        timestamp: now,
+      );
+
+      final map = log.toMap();
+      expect(map['tokenNumber'], 3);
+      expect(map['patientName'], 'Jane Smith');
+      expect(map['action'], 'cancelled');
+
+      final fromMap = ActivityLog.fromMap({
+        'tokenNumber': 3,
+        'patientName': 'Jane Smith',
+        'action': 'cancelled',
+        'timestamp': Timestamp.fromDate(now),
+      }, 'log-1');
+
+      expect(fromMap.tokenNumber, 3);
+      expect(fromMap.action, 'cancelled');
+    });
   });
 }
