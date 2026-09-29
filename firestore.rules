@@ -1,10 +1,42 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Allow full read and write access to authenticated users
-    // This ensures queue operations, calling patients, and renumbering never get blocked
-    match /{document=**} {
-      allow read, write: if request.auth != null;
+    
+    function isAdmin() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    match /users/{userId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    match /departments/{departmentId} {
+      allow read: if request.auth != null;
+      // Allow creation for seeding if it doesn't exist, otherwise only admins can modify
+      allow write: if request.auth != null && (isAdmin() || !exists(/databases/$(database)/documents/departments/$(departmentId)));
+    }
+
+    match /departments/{departmentId}/queue/{tokenId} {
+      allow read: if request.auth != null;
+      // Patients can create tokens for themselves, admins can create for anyone
+      allow create: if request.auth != null && (isAdmin() || request.resource.data.patientId == request.auth.uid);
+      
+      // Patients can update their own tokens (e.g. to cancel/notifiedAt), 
+      // OR they can update the tokenNumber of other tokens (required for the client-side renumbering logic).
+      allow update: if request.auth != null && (
+        isAdmin() || 
+        resource.data.patientId == request.auth.uid || 
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['tokenNumber'])
+      );
+      
+      allow delete: if request.auth != null && isAdmin();
+    }
+
+    match /departments/{departmentId}/activityLog/{logId} {
+      allow read: if request.auth != null;
+      // Anyone can write logs (e.g. when patient cancels or admin marks served)
+      allow write: if request.auth != null;
     }
   }
 }

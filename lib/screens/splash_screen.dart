@@ -91,6 +91,12 @@ class _SplashScreenState extends State<SplashScreen>
 
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
 
+    // Wait until AuthProvider finishes loading its session state from Firebase
+    while (authProvider.isLoading) {
+      await Future.delayed(const Duration(milliseconds: 100));
+      if (!mounted) return;
+    }
+
     if (authProvider.currentUser != null) {
       if (authProvider.currentUser!.role == 'admin') {
         Navigator.of(context).pushReplacement(

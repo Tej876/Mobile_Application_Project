@@ -158,6 +158,11 @@ class QueueProvider extends ChangeNotifier {
       );
 
       await newTokenRef.set(newToken.toMap());
+      
+      // Fix race condition: immediately recalculate token numbers so simultaneous bookings 
+      // get deterministically sorted by their joinedAt timestamp.
+      await _recalculateTokenNumbers(departmentId);
+      
       _currentPatientToken = newToken;
       return newToken;
     } catch (e) {
@@ -288,6 +293,7 @@ class QueueProvider extends ChangeNotifier {
       notifyListeners();
     } catch (e) {
       debugPrint("Error cancelling token: $e");
+      rethrow;
     }
   }
 
@@ -390,6 +396,7 @@ class QueueProvider extends ChangeNotifier {
       notifyListeners();
     } catch (e) {
       debugPrint("Error calling next patient: $e");
+      rethrow;
     }
   }
 
@@ -431,6 +438,7 @@ class QueueProvider extends ChangeNotifier {
       notifyListeners();
     } catch (e) {
       debugPrint("Error marking done: $e");
+      rethrow;
     }
   }
 }

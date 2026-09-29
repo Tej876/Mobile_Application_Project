@@ -121,7 +121,7 @@ class _SelectDepartmentScreenState extends State<SelectDepartmentScreen> {
             ElevatedButton(
               onPressed: () {
                 Navigator.of(ctx).pop();
-                Navigator.of(context).pushReplacement(
+                Navigator.of(context).push(
                   MaterialPageRoute(
                     builder: (_) => LiveStatusScreen(
                       departmentId: _activeTokenInfo!['departmentId'],
@@ -224,7 +224,7 @@ class _SelectDepartmentScreenState extends State<SelectDepartmentScreen> {
       if (!mounted) return;
 
       // Post-booking acknowledgment receipt modal (Rubric D1)
-      await showDialog<void>(
+      showDialog<void>(
         context: context,
         barrierDismissible: false,
         builder: (ctx) => AlertDialog(
@@ -288,21 +288,20 @@ class _SelectDepartmentScreenState extends State<SelectDepartmentScreen> {
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                onPressed: () => Navigator.of(ctx).pop(),
+                onPressed: () {
+                  Navigator.of(ctx).pop();
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => LiveStatusScreen(departmentId: dept.id),
+                    ),
+                  );
+                },
                 child: const Text('Open Live Queue Pass'),
               ),
             ),
           ],
         ),
       );
-
-      if (mounted) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(
-            builder: (_) => LiveStatusScreen(departmentId: dept.id),
-          ),
-        );
-      }
     }
   }
 
@@ -438,7 +437,7 @@ class _SelectDepartmentScreenState extends State<SelectDepartmentScreen> {
 
     return InkWell(
       onTap: () {
-        Navigator.of(context).pushReplacement(
+        Navigator.of(context).push(
           MaterialPageRoute(
             builder: (_) => LiveStatusScreen(departmentId: deptId),
           ),

@@ -88,11 +88,17 @@ class _LiveStatusScreenState extends State<LiveStatusScreen> {
                   child: Row(
                     children: [
                       InkWell(
-                        onTap: () => Navigator.of(context).pushReplacement(
-                          MaterialPageRoute(
-                            builder: (_) => const SelectDepartmentScreen(),
-                          ),
-                        ),
+                        onTap: () {
+                          if (Navigator.of(context).canPop()) {
+                            Navigator.of(context).pop();
+                          } else {
+                            Navigator.of(context).pushReplacement(
+                              MaterialPageRoute(
+                                builder: (_) => const SelectDepartmentScreen(),
+                              ),
+                            );
+                          }
+                        },
                         borderRadius: BorderRadius.circular(10),
                         child: Container(
                           padding: const EdgeInsets.symmetric(
@@ -168,13 +174,18 @@ class _LiveStatusScreenState extends State<LiveStatusScreen> {
                                 ),
                                 const SizedBox(height: 16),
                                 ElevatedButton(
-                                  onPressed: () =>
+                                  onPressed: () {
+                                    if (Navigator.of(context).canPop()) {
+                                      Navigator.of(context).pop();
+                                    } else {
                                       Navigator.of(context).pushReplacement(
-                                    MaterialPageRoute(
-                                      builder: (_) =>
-                                          const SelectDepartmentScreen(),
-                                    ),
-                                  ),
+                                        MaterialPageRoute(
+                                          builder: (_) =>
+                                              const SelectDepartmentScreen(),
+                                        ),
+                                      );
+                                    }
+                                  },
                                   child: const Text('Return to Directory'),
                                 ),
                               ],
@@ -239,13 +250,18 @@ class _LiveStatusScreenState extends State<LiveStatusScreen> {
                                   SizedBox(
                                     width: double.infinity,
                                     child: ElevatedButton(
-                                      onPressed: () =>
+                                      onPressed: () {
+                                        if (Navigator.of(context).canPop()) {
+                                          Navigator.of(context).pop();
+                                        } else {
                                           Navigator.of(context).pushReplacement(
-                                        MaterialPageRoute(
-                                          builder: (_) =>
-                                              const SelectDepartmentScreen(),
-                                        ),
-                                      ),
+                                            MaterialPageRoute(
+                                              builder: (_) =>
+                                                  const SelectDepartmentScreen(),
+                                            ),
+                                          );
+                                        }
+                                      },
                                       child: const Text('Back to Directory'),
                                     ),
                                   ),
@@ -658,12 +674,16 @@ class _LiveStatusScreenState extends State<LiveStatusScreen> {
                                       token.patientName,
                                     );
                                     if (context.mounted) {
-                                      Navigator.of(context).pushReplacement(
-                                        MaterialPageRoute(
-                                          builder: (_) =>
-                                              const SelectDepartmentScreen(),
-                                        ),
-                                      );
+                                      if (Navigator.of(context).canPop()) {
+                                        Navigator.of(context).pop();
+                                      } else {
+                                        Navigator.of(context).pushReplacement(
+                                          MaterialPageRoute(
+                                            builder: (_) =>
+                                                const SelectDepartmentScreen(),
+                                          ),
+                                        );
+                                      }
                                     }
                                   }
                                 },

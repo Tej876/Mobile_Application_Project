@@ -15,14 +15,13 @@ QueueLess is a Flutter mobile/web application for real-time clinic queue managem
 - Patients can cancel only while their token is waiting
 - Admin can call the next patient, mark a patient as served, or mark no-show
 - Queue activity log
-- Firebase Cloud Messaging support for third-in-line notifications
+- Local device notifications for queue updates
 
 ## Tech Stack
 
 - Flutter / Dart
 - Firebase Authentication
 - Cloud Firestore
-- Firebase Cloud Messaging
 - Provider state management
 
 ## Requirements

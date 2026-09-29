@@ -22,6 +22,10 @@ class _AuthScreenState extends State<AuthScreen> {
   final _nameController = TextEditingController();
   bool _isLogin = true;
   String _selectedRole = 'patient';
+  
+  String? _emailError;
+  String? _passwordError;
+  String? _nameError;
 
   String _formatAuthError(Object e) {
     if (e is FirebaseAuthException) {
@@ -75,25 +79,33 @@ class _AuthScreenState extends State<AuthScreen> {
     final password = _passwordController.text.trim();
     final name = _nameController.text.trim();
 
+    setState(() {
+      _emailError = null;
+      _passwordError = null;
+      _nameError = null;
+    });
+
+    bool hasError = false;
+
     if (!_isLogin && name.isEmpty) {
-      _showErrorSnackBar('Please enter your full name.');
-      return;
+      setState(() => _nameError = 'Please enter your full name.');
+      hasError = true;
     }
 
     if (email.isEmpty || !email.contains('@') || !email.contains('.')) {
-      _showErrorSnackBar('Please enter a valid email address.');
-      return;
+      setState(() => _emailError = 'Please enter a valid email address.');
+      hasError = true;
     }
 
     if (password.isEmpty) {
-      _showErrorSnackBar('Please enter your password.');
-      return;
+      setState(() => _passwordError = 'Please enter your password.');
+      hasError = true;
+    } else if (password.length < 6) {
+      setState(() => _passwordError = 'Password must be at least 6 characters long.');
+      hasError = true;
     }
 
-    if (password.length < 6) {
-      _showErrorSnackBar('Password must be at least 6 characters long.');
-      return;
-    }
+    if (hasError) return;
 
     final auth = Provider.of<AuthProvider>(context, listen: false);
 
@@ -139,7 +151,14 @@ class _AuthScreenState extends State<AuthScreen> {
       }
     } catch (e) {
       if (!mounted) return;
-      _showErrorSnackBar(_formatAuthError(e));
+      final errorMsg = _formatAuthError(e);
+      if (errorMsg.toLowerCase().contains('email')) {
+        setState(() => _emailError = errorMsg);
+      } else if (errorMsg.toLowerCase().contains('password')) {
+        setState(() => _passwordError = errorMsg);
+      } else {
+        _showErrorSnackBar(errorMsg);
+      }
     }
   }
 
@@ -210,14 +229,24 @@ class _AuthScreenState extends State<AuthScreen> {
                           child: _buildModeTab(
                             title: 'Sign in',
                             selected: _isLogin,
-                            onTap: () => setState(() => _isLogin = true),
+                            onTap: () => setState(() {
+                              _isLogin = true;
+                              _emailError = null;
+                              _passwordError = null;
+                              _nameError = null;
+                            }),
                           ),
                         ),
                         Expanded(
                           child: _buildModeTab(
                             title: 'Create account',
                             selected: !_isLogin,
-                            onTap: () => setState(() => _isLogin = false),
+                            onTap: () => setState(() {
+                              _isLogin = false;
+                              _emailError = null;
+                              _passwordError = null;
+                              _nameError = null;
+                            }),
                           ),
                         ),
                       ],
@@ -261,8 +290,9 @@ class _AuthScreenState extends State<AuthScreen> {
                           TextField(
                             controller: _nameController,
                             textInputAction: TextInputAction.next,
-                            decoration: const InputDecoration(
+                            decoration: InputDecoration(
                               hintText: 'Aarav Sharma',
+                              errorText: _nameError,
                             ),
                           ),
                           const SizedBox(height: 16),
@@ -273,8 +303,9 @@ class _AuthScreenState extends State<AuthScreen> {
                           controller: _emailController,
                           keyboardType: TextInputType.emailAddress,
                           textInputAction: TextInputAction.next,
-                          decoration: const InputDecoration(
+                          decoration: InputDecoration(
                             hintText: 'name@example.com',
+                            errorText: _emailError,
                           ),
                         ),
                         const SizedBox(height: 16),
@@ -284,8 +315,9 @@ class _AuthScreenState extends State<AuthScreen> {
                           controller: _passwordController,
                           obscureText: true,
                           onSubmitted: (_) => _submit(),
-                          decoration: const InputDecoration(
+                          decoration: InputDecoration(
                             hintText: 'At least 6 characters',
+                            errorText: _passwordError,
                           ),
                         ),
                         const SizedBox(height: 24),
@@ -315,6 +347,9 @@ class _AuthScreenState extends State<AuthScreen> {
                       onPressed: () {
                         setState(() {
                           _isLogin = !_isLogin;
+                          _emailError = null;
+                          _passwordError = null;
+                          _nameError = null;
                         });
                       },
                       child: Text(
