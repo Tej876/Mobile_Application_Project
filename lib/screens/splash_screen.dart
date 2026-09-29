@@ -124,41 +124,22 @@ class _SplashScreenState extends State<SplashScreen>
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        Container(
-          padding: const EdgeInsets.all(22),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(26),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.12),
-                blurRadius: 24,
-                offset: const Offset(0, 10),
-              ),
-            ],
-          ),
-          child: const Icon(
-            Icons.queue,
-            size: 68,
-            color: Color(0xFF8C7AE6),
-          ),
-        ),
-        const SizedBox(height: 26),
         Text(
           'QueueLess',
           style: Theme.of(context).textTheme.displayLarge?.copyWith(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-                letterSpacing: -0.5,
+                color: const Color(0xFFF6E7E2), // Blush
+                fontSize: 44,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -1.1,
               ),
         ),
         const SizedBox(height: 10),
         Text(
-          'Healthcare, simplified',
+          'Calm, transparent clinic queues.',
           style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                color: Colors.white.withValues(alpha: 0.85),
+                color: const Color(0xFFE6CFC8), // Peach
                 fontWeight: FontWeight.w500,
-                letterSpacing: 0.2,
+                fontSize: 16,
               ),
         ),
       ],
@@ -168,7 +149,7 @@ class _SplashScreenState extends State<SplashScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF8F9FE),
+      backgroundColor: const Color(0xFFF6E7E2), // Blush
       body: AnimatedBuilder(
         animation: _controller,
         builder: (context, child) {
@@ -178,14 +159,14 @@ class _SplashScreenState extends State<SplashScreen>
 
           return Stack(
             children: [
-              // 1. Base Layer: Clean background with no text
+              // 1. Base Layer: Blush Canvas
               Container(
                 width: size.width,
                 height: size.height,
-                color: const Color(0xFFF8F9FE),
+                color: const Color(0xFFF6E7E2), // Blush
               ),
 
-              // 2. Secondary Wave Layer: Softer fluid trailing slightly
+              // 2. Secondary Wave Layer: Dusty Plum trail
               ClipPath(
                 clipper: WaveDripClipper(
                   progress: secProgress,
@@ -194,11 +175,11 @@ class _SplashScreenState extends State<SplashScreen>
                 child: Container(
                   width: size.width,
                   height: size.height,
-                  color: const Color(0xFF8C7AE6).withValues(alpha: 0.35),
+                  color: const Color(0xFF7E6570).withValues(alpha: 0.45), // Plum
                 ),
               ),
 
-              // 3. Primary Wave Layer: Flows down and covers the viewport
+              // 3. Primary Wave Layer: Maroon -> Charcoal
               ClipPath(
                 clipper: WaveDripClipper(
                   progress: progress,
@@ -212,12 +193,11 @@ class _SplashScreenState extends State<SplashScreen>
                       begin: Alignment.topCenter,
                       end: Alignment.bottomCenter,
                       colors: [
-                        Color(0xFF7A68D6),
-                        Color(0xFF8C7AE6),
+                        Color(0xFF33252B), // Charcoal
+                        Color(0xFF593E47), // Maroon
                       ],
                     ),
                   ),
-                  // Text and logo animate into place AFTER the wave covers the screen
                   child: FadeTransition(
                     opacity: _textFadeAnimation,
                     child: SlideTransition(

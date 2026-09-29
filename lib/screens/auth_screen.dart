@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart' show FirebaseAuthException;
 import 'package:provider/provider.dart';
 
-import '../../providers/auth_provider.dart';
-import '../../providers/queue_provider.dart';
+import '../providers/auth_provider.dart';
+import '../providers/queue_provider.dart';
+import '../theme/app_theme.dart';
 import 'patient/select_department_screen.dart';
 import 'patient/live_status_screen.dart';
 import 'admin/dashboard_screen.dart';
@@ -21,33 +23,89 @@ class _AuthScreenState extends State<AuthScreen> {
   bool _isLogin = true;
   String _selectedRole = 'patient';
 
+  String _formatAuthError(Object e) {
+    if (e is FirebaseAuthException) {
+      switch (e.code) {
+        case 'invalid-email':
+          return 'Please enter a valid email address.';
+        case 'user-not-found':
+        case 'wrong-password':
+        case 'invalid-credential':
+          return 'Invalid email or password. Please check your credentials and try again.';
+        case 'email-already-in-use':
+          return 'An account already exists with this email. Please sign in instead.';
+        case 'weak-password':
+          return 'Password is too weak. Please use at least 6 characters.';
+        case 'network-request-failed':
+          return 'Network error. Please check your internet connection.';
+        case 'too-many-requests':
+          return 'Too many attempts. Please wait a moment and try again.';
+        default:
+          return e.message ?? 'Authentication failed. Please try again.';
+      }
+    }
+    return e.toString().replaceFirst('Exception: ', '');
+  }
+
+  void _showErrorSnackBar(String message) {
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.error_outline, color: Colors.white, size: 18),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                message,
+                style: const TextStyle(fontWeight: FontWeight.w500),
+              ),
+            ),
+          ],
+        ),
+        backgroundColor: AppTheme.errorColor,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
+  }
+
   void _submit() async {
+    final email = _emailController.text.trim();
+    final password = _passwordController.text.trim();
+    final name = _nameController.text.trim();
+
+    if (!_isLogin && name.isEmpty) {
+      _showErrorSnackBar('Please enter your full name.');
+      return;
+    }
+
+    if (email.isEmpty || !email.contains('@') || !email.contains('.')) {
+      _showErrorSnackBar('Please enter a valid email address.');
+      return;
+    }
+
+    if (password.isEmpty) {
+      _showErrorSnackBar('Please enter your password.');
+      return;
+    }
+
+    if (password.length < 6) {
+      _showErrorSnackBar('Password must be at least 6 characters long.');
+      return;
+    }
+
     final auth = Provider.of<AuthProvider>(context, listen: false);
 
     try {
       if (_isLogin) {
-        await auth.login(
-          _emailController.text.trim(),
-          _passwordController.text.trim(),
-        );
+        await auth.login(email, password);
       } else {
-        if (_nameController.text.trim().isEmpty) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Please enter your name')),
-          );
-          return;
-        }
-        await auth.register(
-          _emailController.text.trim(),
-          _passwordController.text.trim(),
-          _nameController.text.trim(),
-          _selectedRole,
-        );
+        await auth.register(email, password, name, _selectedRole);
       }
 
       if (!mounted) return;
 
-      // Wait briefly for authStateChanges listener to populate the currentUser
       for (int i = 0; i < 20; i++) {
         if (auth.currentUser != null) break;
         await Future.delayed(const Duration(milliseconds: 100));
@@ -62,12 +120,14 @@ class _AuthScreenState extends State<AuthScreen> {
           );
         } else {
           final queue = Provider.of<QueueProvider>(context, listen: false);
-          final active = await queue.findActivePatientToken(auth.currentUser!.uid);
+          final active =
+              await queue.findActivePatientToken(auth.currentUser!.uid);
           if (!mounted) return;
           if (active != null) {
             Navigator.of(context).pushReplacement(
               MaterialPageRoute(
-                builder: (_) => LiveStatusScreen(departmentId: active['departmentId']),
+                builder: (_) =>
+                    LiveStatusScreen(departmentId: active['departmentId']),
               ),
             );
           } else {
@@ -79,9 +139,22 @@ class _AuthScreenState extends State<AuthScreen> {
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(e.toString())));
+      _showErrorSnackBar(_formatAuthError(e));
     }
+  }
+
+  Widget _buildFieldLabel(String label) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6.0),
+      child: Text(
+        label,
+        style: const TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+          color: AppTheme.textPrimary,
+        ),
+      ),
+    );
   }
 
   @override
@@ -90,128 +163,205 @@ class _AuthScreenState extends State<AuthScreen> {
 
     return Scaffold(
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const SizedBox(height: 40),
-              Center(
-                child: Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).primaryColor
-                        .withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Icon(
-                    Icons.queue,
-                    size: 48,
-                    color: Theme.of(context).primaryColor,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 24),
-              Text(
-                'QueueLess',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.displayMedium,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Healthcare, simplified',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-              const SizedBox(height: 40),
-
-              if (!_isLogin) ...[
-                Text(
-                  'I am a...',
-                  style: Theme.of(context).textTheme.bodyMedium
-                      ?.copyWith(fontWeight: FontWeight.w600),
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _buildRoleCard(
-                        'patient',
-                        Icons.person_outline,
-                        'Patient',
-                        'Join a queue',
-                      ),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 36.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'QueueLess',
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.primaryColor,
+                      letterSpacing: -0.2,
                     ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: _buildRoleCard(
-                        'admin',
-                        Icons.calendar_today_outlined,
-                        'Staff',
-                        'Manage queues',
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 24),
-                TextField(
-                  controller: _nameController,
-                  decoration: const InputDecoration(
-                    hintText: 'Full Name',
-                    prefixIcon: Icon(Icons.person_outline),
                   ),
-                ),
-                const SizedBox(height: 16),
-              ],
+                  const SizedBox(height: 16),
+                  Text(
+                    _isLogin
+                        ? 'Sign in to your clinic pass'
+                        : 'Create your clinic account',
+                    style: Theme.of(context).textTheme.displayMedium,
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    _isLogin
+                        ? 'Check live department wait times or manage patient dispatch.'
+                        : 'Register once as a patient or staff member to join or manage queues.',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                  const SizedBox(height: 24),
 
-              TextField(
-                controller: _emailController,
-                keyboardType: TextInputType.emailAddress,
-                decoration: const InputDecoration(
-                  hintText: 'Email address',
-                  prefixIcon: Icon(Icons.email_outlined),
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: _passwordController,
-                obscureText: true,
-                decoration: const InputDecoration(
-                  hintText: 'Password',
-                  prefixIcon: Icon(Icons.lock_outline),
-                ),
-              ),
-              const SizedBox(height: 32),
-
-              ElevatedButton(
-                onPressed: auth.isLoading ? null : _submit,
-                child: auth.isLoading
-                    ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(
-                          color: Colors.white,
-                          strokeWidth: 2,
+                  // Segmented Mode Switcher
+                  Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: AppTheme.surfaceMuted,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: AppTheme.borderColor),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: _buildModeTab(
+                            title: 'Sign in',
+                            selected: _isLogin,
+                            onTap: () => setState(() => _isLogin = true),
+                          ),
                         ),
-                      )
-                    : Text(_isLogin ? 'Log In' : 'Create Account'),
-              ),
+                        Expanded(
+                          child: _buildModeTab(
+                            title: 'Create account',
+                            selected: !_isLogin,
+                            onTap: () => setState(() => _isLogin = false),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 20),
 
-              const SizedBox(height: 24),
-              TextButton(
-                onPressed: () {
-                  setState(() {
-                    _isLogin = !_isLogin;
-                  });
-                },
-                child: Text(
-                  _isLogin
-                      ? 'New here? Create an account'
-                      : 'Already have an account? Log in',
-                  style: TextStyle(color: Theme.of(context).primaryColor),
-                ),
+                  Container(
+                    padding: const EdgeInsets.all(22),
+                    decoration: BoxDecoration(
+                      color: AppTheme.surfaceColor,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: AppTheme.borderColor),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (!_isLogin) ...[
+                          _buildFieldLabel('Account role'),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: _buildRoleCard(
+                                  'patient',
+                                  'Patient',
+                                  'Book & track token',
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: _buildRoleCard(
+                                  'admin',
+                                  'Clinic Staff',
+                                  'Call & manage queue',
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 18),
+                          _buildFieldLabel('Full name'),
+                          TextField(
+                            controller: _nameController,
+                            textInputAction: TextInputAction.next,
+                            decoration: const InputDecoration(
+                              hintText: 'Aarav Sharma',
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                        ],
+
+                        _buildFieldLabel('Email address'),
+                        TextField(
+                          controller: _emailController,
+                          keyboardType: TextInputType.emailAddress,
+                          textInputAction: TextInputAction.next,
+                          decoration: const InputDecoration(
+                            hintText: 'name@example.com',
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+
+                        _buildFieldLabel('Password'),
+                        TextField(
+                          controller: _passwordController,
+                          obscureText: true,
+                          onSubmitted: (_) => _submit(),
+                          decoration: const InputDecoration(
+                            hintText: 'At least 6 characters',
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+
+                        ElevatedButton(
+                          onPressed: auth.isLoading ? null : _submit,
+                          child: auth.isLoading
+                              ? const SizedBox(
+                                  height: 20,
+                                  width: 20,
+                                  child: CircularProgressIndicator(
+                                    color: Colors.white,
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : Text(
+                                  _isLogin ? 'Sign in' : 'Create account',
+                                ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 20),
+                  Center(
+                    child: TextButton(
+                      onPressed: () {
+                        setState(() {
+                          _isLogin = !_isLogin;
+                        });
+                      },
+                      child: Text(
+                        _isLogin
+                            ? 'First visit? Create a patient or staff account →'
+                            : 'Already registered? Sign in to your account →',
+                        style: const TextStyle(
+                          color: AppTheme.primaryColor,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13.5,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildModeTab({
+    required String title,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(
+          color: selected ? AppTheme.surfaceColor : Colors.transparent,
+          borderRadius: BorderRadius.circular(7),
+          border: selected
+              ? Border.all(color: AppTheme.borderColor)
+              : Border.all(color: Colors.transparent),
+        ),
+        child: Text(
+          title,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+            fontSize: 13.5,
+            color: selected ? AppTheme.textPrimary : AppTheme.textSecondary,
           ),
         ),
       ),
@@ -220,48 +370,66 @@ class _AuthScreenState extends State<AuthScreen> {
 
   Widget _buildRoleCard(
     String role,
-    IconData icon,
     String title,
     String subtitle,
   ) {
     final isSelected = _selectedRole == role;
-    final color = isSelected
-        ? Theme.of(context).primaryColor
-        : Colors.grey.shade300;
 
     return GestureDetector(
       onTap: () => setState(() => _selectedRole = role),
-      child: Container(
-        padding: const EdgeInsets.all(16),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
           color: isSelected
-              ? Theme.of(context).primaryColor.withValues(alpha: 0.05)
-              : Colors.white,
-          border: Border.all(color: color, width: isSelected ? 2 : 1),
-          borderRadius: BorderRadius.circular(16),
+              ? AppTheme.primaryColor.withValues(alpha: 0.06)
+              : AppTheme.backgroundColor,
+          border: Border.all(
+            color: isSelected ? AppTheme.primaryColor : AppTheme.borderColor,
+            width: isSelected ? 1.5 : 1,
+          ),
+          borderRadius: BorderRadius.circular(10),
         ),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(
-              icon,
-              color: isSelected
-                  ? Theme.of(context).primaryColor
-                  : Colors.grey.shade600,
+            Row(
+              children: [
+                Container(
+                  width: 14,
+                  height: 14,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: isSelected
+                          ? AppTheme.primaryColor
+                          : AppTheme.textSecondary,
+                      width: isSelected ? 4.5 : 1.5,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13.5,
+                      color: isSelected
+                          ? AppTheme.primaryColor
+                          : AppTheme.textPrimary,
+                    ),
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 8),
-            Text(
-              title,
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                color: isSelected
-                    ? Theme.of(context).primaryColor
-                    : Colors.black87,
-              ),
-            ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 6),
             Text(
               subtitle,
-              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              style: const TextStyle(
+                fontSize: 12,
+                color: AppTheme.textSecondary,
+              ),
             ),
           ],
         ),
@@ -269,3 +437,4 @@ class _AuthScreenState extends State<AuthScreen> {
     );
   }
 }
+
