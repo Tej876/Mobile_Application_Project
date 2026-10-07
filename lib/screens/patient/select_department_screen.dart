@@ -4,6 +4,7 @@ import '../../providers/queue_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../models/department.dart';
 import '../../services/notification_service.dart';
+import '../../services/email_service.dart';
 import '../../theme/app_theme.dart';
 import 'live_status_screen.dart';
 import '../auth_screen.dart';
@@ -198,6 +199,7 @@ class _SelectDepartmentScreenState extends State<SelectDepartmentScreen> {
       final patientName = auth.currentUser!.name.isNotEmpty
           ? auth.currentUser!.name
           : 'Patient';
+      final patientEmail = auth.currentUser!.email;
 
       final newToken = await queue.joinQueue(
         dept.id,
@@ -209,9 +211,24 @@ class _SelectDepartmentScreenState extends State<SelectDepartmentScreen> {
 
       final peopleAhead =
           newToken.tokenNumber > 1 ? newToken.tokenNumber - 1 : 0;
+      final estWaitMins = peopleAhead > 0
+          ? (peopleAhead * dept.avgConsultationMins) + 5
+          : 5;
       final estWait = peopleAhead > 0
-          ? '~${(peopleAhead * dept.avgConsultationMins) + 5} min'
+          ? '~$estWaitMins min'
           : '~5 min (Next in line)';
+
+      // Trigger booking confirmation email (Single trigger point per faculty rubric)
+      if (patientEmail.isNotEmpty) {
+        EmailService().sendBookingConfirmation(
+          recipientEmail: patientEmail,
+          patientName: patientName,
+          departmentName: dept.name,
+          tokenNumber: newToken.tokenNumber,
+          estWaitMins: estWaitMins,
+          departmentId: dept.id,
+        );
+      }
 
       await NotificationService().showNotification(
         id: newToken.tokenNumber,
@@ -279,6 +296,32 @@ class _SelectDepartmentScreenState extends State<SelectDepartmentScreen> {
                     _buildReceiptRow('Patient', patientName),
                     const Divider(height: 14),
                     _buildReceiptRow('Estimated wait', estWait),
+                    if (patientEmail.isNotEmpty) ...[
+                      const Divider(height: 14),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          const Icon(
+                            Icons.mark_email_read_outlined,
+                            size: 15,
+                            color: AppTheme.primaryColor,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Confirmation email sent to $patientEmail',
+                              style: const TextStyle(
+                                color: AppTheme.textSecondary,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               ),

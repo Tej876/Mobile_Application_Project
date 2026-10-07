@@ -37,7 +37,23 @@ class AuthProvider extends ChangeNotifier {
     try {
       final doc = await _firestore.collection('users').doc(uid).get();
       if (doc.exists) {
-        _currentUser = AppUser.fromMap(doc.data()!, doc.id);
+        final data = doc.data()!;
+        final email = (data['email'] as String?)?.isNotEmpty == true
+            ? data['email'] as String
+            : (_auth.currentUser?.email ?? '');
+        _currentUser = AppUser(
+          uid: doc.id,
+          role: data['role'] ?? 'patient',
+          name: data['name'] ?? '',
+          email: email,
+        );
+      } else if (_auth.currentUser != null) {
+        _currentUser = AppUser(
+          uid: uid,
+          role: 'patient',
+          name: _auth.currentUser!.displayName ?? 'Patient',
+          email: _auth.currentUser!.email ?? '',
+        );
       }
     } catch (e) {
       debugPrint("Error fetching user data: $e");
@@ -78,10 +94,13 @@ class AuthProvider extends ChangeNotifier {
       _isLoading = true;
       notifyListeners();
       
-      await _auth.signInWithEmailAndPassword(
+      UserCredential cred = await _auth.signInWithEmailAndPassword(
         email: email,
         password: password,
       );
+      if (cred.user != null) {
+        await _fetchUserData(cred.user!.uid);
+      }
     } catch (e) {
       rethrow;
     } finally {
