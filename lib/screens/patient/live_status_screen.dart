@@ -4,6 +4,7 @@ import '../../providers/queue_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../models/queue_token.dart';
 import '../../services/notification_service.dart';
+import '../../services/api_service.dart';
 import '../../theme/app_theme.dart';
 import 'select_department_screen.dart';
 
@@ -28,26 +29,28 @@ class _LiveStatusScreenState extends State<LiveStatusScreen> {
 
   String _formatTokenNum(int n) => '#${n.toString().padLeft(2, '0')}';
 
-  void _checkAndNotify(
-    int position,
-    String status,
-    String tokenId,
-    String deptName,
-    DateTime? notifiedAt,
-  ) {
+  void _checkAndNotify({
+    required int tokenNumber,
+    required int position,
+    required String status,
+    required String tokenId,
+    required String deptName,
+    required DateTime? notifiedAt,
+  }) {
     if (status == 'called' && !_hasNotifiedCalled) {
       _hasNotifiedCalled = true;
       NotificationService().showNotification(
         id: tokenId.hashCode + 100,
         title: 'It\'s Your Turn • QueueLess',
         body:
-            'Pass ${_formatTokenNum(position)} has been called to $deptName. Please proceed to the consultation room.',
+            'Pass ${_formatTokenNum(tokenNumber)} has been called to $deptName. Please proceed to the consultation room.',
         context: context,
       );
       return;
     }
 
     if (status == 'waiting' &&
+        position > 0 &&
         position <= 3 &&
         _lastNotifiedPosition != position) {
       _lastNotifiedPosition = position;
@@ -196,9 +199,11 @@ class _LiveStatusScreenState extends State<LiveStatusScreen> {
                         );
                       }
 
-                      if (token.status == 'served' ||
-                          token.status == 'no_show') {
+                      if (token.status != 'waiting' &&
+                          token.status != 'called') {
                         final isServed = token.status == 'served';
+                        final isCancelled = token.status == 'cancelled';
+                        final isNoShow = token.status == 'no_show';
                         return Center(
                           child: Padding(
                             padding: const EdgeInsets.all(24.0),
@@ -217,25 +222,41 @@ class _LiveStatusScreenState extends State<LiveStatusScreen> {
                                     decoration: BoxDecoration(
                                       color: (isServed
                                               ? AppTheme.successColor
-                                              : AppTheme.errorColor)
+                                              : (isCancelled
+                                                  ? AppTheme.textSecondary
+                                                  : (isNoShow
+                                                      ? AppTheme.errorColor
+                                                      : AppTheme.primaryColor)))
                                           .withValues(alpha: 0.1),
                                       shape: BoxShape.circle,
                                     ),
                                     child: Icon(
                                       isServed
                                           ? Icons.check_rounded
-                                          : Icons.close_rounded,
+                                          : (isCancelled
+                                              ? Icons.cancel_outlined
+                                              : (isNoShow
+                                                  ? Icons.close_rounded
+                                                  : Icons.info_outline_rounded)),
                                       size: 36,
                                       color: isServed
                                           ? AppTheme.successColor
-                                          : AppTheme.errorColor,
+                                          : (isCancelled
+                                              ? AppTheme.textSecondary
+                                              : (isNoShow
+                                                  ? AppTheme.errorColor
+                                                  : AppTheme.primaryColor)),
                                     ),
                                   ),
                                   const SizedBox(height: 18),
                                   Text(
                                     isServed
                                         ? 'Consultation Complete'
-                                        : 'Marked as No-Show',
+                                        : (isCancelled
+                                            ? 'Booking Cancelled'
+                                            : (isNoShow
+                                                ? 'Marked as No-Show'
+                                                : 'Pass Inactive')),
                                     style:
                                         Theme.of(context).textTheme.titleLarge,
                                   ),
@@ -243,7 +264,11 @@ class _LiveStatusScreenState extends State<LiveStatusScreen> {
                                   Text(
                                     isServed
                                         ? 'Thank you for visiting ${dept.name}.'
-                                        : 'Your pass was closed by clinic staff.',
+                                        : (isCancelled
+                                            ? 'This queue pass has been cancelled.'
+                                            : (isNoShow
+                                                ? 'Your pass was closed by clinic staff.'
+                                                : 'This queue pass is no longer active.')),
                                     textAlign: TextAlign.center,
                                     style:
                                         Theme.of(context).textTheme.bodyMedium,
@@ -274,24 +299,31 @@ class _LiveStatusScreenState extends State<LiveStatusScreen> {
                         );
                       }
 
-                      final position = token.tokenNumber;
+                      final isCalled = token.status == 'called';
+                      final position = isCalled
+                          ? 0
+                          : (token.position > 0
+                              ? token.position
+                              : (token.tokenNumber > 0 ? token.tokenNumber : 1));
                       final peopleAhead = position > 0 ? position - 1 : 0;
-                      final waitTime =
-                          (peopleAhead * dept.avgConsultationMins) + 5;
+                      final waitTime = isCalled
+                          ? 0
+                          : (token.estWaitMins > 0
+                              ? token.estWaitMins
+                              : (peopleAhead * dept.avgConsultationMins) + 5);
 
                       WidgetsBinding.instance.addPostFrameCallback((_) {
                         if (mounted) {
                           _checkAndNotify(
-                            position,
-                            token.status,
-                            token.id,
-                            dept.name,
-                            token.notifiedAt,
+                            tokenNumber: token.tokenNumber,
+                            position: position,
+                            status: token.status,
+                            tokenId: token.id,
+                            deptName: dept.name,
+                            notifiedAt: token.notifiedAt,
                           );
                         }
                       });
-
-                      final isCalled = token.status == 'called';
 
                       return SingleChildScrollView(
                         padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
@@ -488,8 +520,8 @@ class _LiveStatusScreenState extends State<LiveStatusScreen> {
                                           child: Text(
                                             isCalled
                                                 ? 'CALLED • PROCEED TO CONSULTATION ROOM'
-                                                : (token.tokenNumber > 1
-                                                    ? '${token.tokenNumber - 1} PATIENT${token.tokenNumber - 1 == 1 ? '' : 'S'} AHEAD OF YOU'
+                                                : (peopleAhead > 0
+                                                    ? '$peopleAhead PATIENT${peopleAhead == 1 ? '' : 'S'} AHEAD OF YOU'
                                                     : 'YOU ARE #01 • NEXT IN LINE'),
                                             style: AppTheme.monoStyle(
                                               fontSize: 11.5,
@@ -569,9 +601,7 @@ class _LiveStatusScreenState extends State<LiveStatusScreen> {
                                                 Text(
                                                   isCalled
                                                       ? 'NOW'
-                                                      : (token.tokenNumber > 1
-                                                          ? '~$waitTime MIN'
-                                                          : '~5 MIN'),
+                                                      : '~$waitTime MIN',
                                                   style: AppTheme.monoStyle(
                                                     fontSize: 22,
                                                     fontWeight: FontWeight.w800,
@@ -669,20 +699,54 @@ class _LiveStatusScreenState extends State<LiveStatusScreen> {
                                   );
 
                                   if (shouldCancel == true && context.mounted) {
-                                    await queue.cancelToken(
-                                      widget.departmentId,
-                                      token.id,
-                                      token.tokenNumber,
-                                      token.patientName,
-                                    );
-                                    if (context.mounted) {
-                                      if (Navigator.of(context).canPop()) {
-                                        Navigator.of(context).pop();
-                                      } else {
-                                        Navigator.of(context).pushReplacement(
-                                          MaterialPageRoute(
-                                            builder: (_) =>
-                                                const SelectDepartmentScreen(),
+                                    try {
+                                      await queue.cancelToken(
+                                        widget.departmentId,
+                                        token.id,
+                                        token.tokenNumber,
+                                        token.patientName,
+                                      );
+                                      if (context.mounted) {
+                                        if (Navigator.of(context).canPop()) {
+                                          Navigator.of(context).pop();
+                                        } else {
+                                          Navigator.of(context).pushReplacement(
+                                            MaterialPageRoute(
+                                              builder: (_) =>
+                                                  const SelectDepartmentScreen(),
+                                            ),
+                                          );
+                                        }
+                                      }
+                                    } on ApiException catch (e) {
+                                      if (context.mounted) {
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          SnackBar(
+                                            content: Text(
+                                              e.message,
+                                              style: AppTheme.monoStyle(
+                                                fontSize: 12,
+                                                color: Colors.white,
+                                              ),
+                                            ),
+                                            backgroundColor: AppTheme.errorColor,
+                                            behavior: SnackBarBehavior.floating,
+                                          ),
+                                        );
+                                      }
+                                    } catch (e) {
+                                      if (context.mounted) {
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          SnackBar(
+                                            content: Text(
+                                              'Failed to cancel booking: $e',
+                                              style: AppTheme.monoStyle(
+                                                fontSize: 12,
+                                                color: Colors.white,
+                                              ),
+                                            ),
+                                            backgroundColor: AppTheme.errorColor,
+                                            behavior: SnackBarBehavior.floating,
                                           ),
                                         );
                                       }

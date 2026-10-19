@@ -3,10 +3,13 @@ import 'package:provider/provider.dart';
 import '../../providers/queue_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../models/department.dart';
+import '../../models/queue_token.dart';
 import '../../services/notification_service.dart';
 import '../../services/email_service.dart';
+import '../../services/api_service.dart';
 import '../../theme/app_theme.dart';
 import 'live_status_screen.dart';
+import 'booking_history_sheet.dart';
 import '../auth_screen.dart';
 
 class SelectDepartmentScreen extends StatefulWidget {
@@ -201,22 +204,90 @@ class _SelectDepartmentScreenState extends State<SelectDepartmentScreen> {
           : 'Patient';
       final patientEmail = auth.currentUser!.email;
 
-      final newToken = await queue.joinQueue(
-        dept.id,
-        auth.currentUser!.uid,
-        patientName,
-      );
+      QueueToken? newToken;
+      try {
+        newToken = await queue.joinQueue(
+          dept.id,
+          auth.currentUser!.uid,
+          patientName,
+        );
+      } on ApiException catch (e) {
+        if (!mounted) return;
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: AppTheme.surfaceColor,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+              side: const BorderSide(color: AppTheme.borderColor),
+            ),
+            title: Row(
+              children: [
+                Icon(
+                  e.statusCode == 409
+                      ? Icons.warning_amber_rounded
+                      : Icons.error_outline_rounded,
+                  color: e.statusCode == 409
+                      ? AppTheme.accentColor
+                      : AppTheme.errorColor,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  e.statusCode == 409
+                      ? 'Booking Conflict'
+                      : 'Booking Failed',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 18,
+                  ),
+                ),
+              ],
+            ),
+            content: Text(
+              e.message,
+              style: const TextStyle(fontSize: 14),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.of(ctx).pop();
+                  _loadData();
+                },
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+        return;
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to join queue: $e'),
+            backgroundColor: AppTheme.errorColor,
+          ),
+        );
+        return;
+      }
 
       if (!mounted || newToken == null) return;
+      final createdToken = newToken;
 
-      final peopleAhead =
-          newToken.tokenNumber > 1 ? newToken.tokenNumber - 1 : 0;
-      final estWaitMins = peopleAhead > 0
-          ? (peopleAhead * dept.avgConsultationMins) + 5
-          : 5;
-      final estWait = peopleAhead > 0
-          ? '~$estWaitMins min'
-          : '~5 min (Next in line)';
+      // Determine effective position for fallback calculation if position is 0
+      final int effectivePos = createdToken.position > 0
+          ? createdToken.position
+          : createdToken.tokenNumber;
+      final int peopleAhead = effectivePos > 0 ? effectivePos - 1 : 0;
+
+      // Use backend authoritative wait estimate if provided, falling back to formula
+      final int estWaitMins = createdToken.estWaitMins > 0
+          ? createdToken.estWaitMins
+          : (peopleAhead * dept.avgConsultationMins) + 5;
+
+      // Only claim "Next in line" when backend explicitly confirms position == 1
+      final String estWait = createdToken.position == 1
+          ? '~5 min (Next in line)'
+          : '~$estWaitMins min';
 
       // Trigger booking confirmation email (Single trigger point per faculty rubric)
       if (patientEmail.isNotEmpty) {
@@ -224,17 +295,17 @@ class _SelectDepartmentScreenState extends State<SelectDepartmentScreen> {
           recipientEmail: patientEmail,
           patientName: patientName,
           departmentName: dept.name,
-          tokenNumber: newToken.tokenNumber,
+          tokenNumber: createdToken.tokenNumber,
           estWaitMins: estWaitMins,
           departmentId: dept.id,
         );
       }
 
       await NotificationService().showNotification(
-        id: newToken.tokenNumber,
+        id: createdToken.tokenNumber,
         title: 'Booking Confirmed • QueueLess',
         body:
-            'Pass ${_formatTokenNum(newToken.tokenNumber)} issued for ${dept.name} ($estWait).',
+            'Pass ${_formatTokenNum(createdToken.tokenNumber)} issued for ${dept.name} ($estWait).',
         context: context,
       );
 
@@ -287,7 +358,7 @@ class _SelectDepartmentScreenState extends State<SelectDepartmentScreen> {
                   children: [
                     _buildReceiptRow(
                       'Assigned token',
-                      _formatTokenNum(newToken.tokenNumber),
+                      _formatTokenNum(createdToken.tokenNumber),
                       highlight: true,
                     ),
                     const Divider(height: 14),
@@ -386,6 +457,12 @@ class _SelectDepartmentScreenState extends State<SelectDepartmentScreen> {
                           ],
                         ),
                       ),
+                      _buildHeaderActionButton(
+                        icon: Icons.history_rounded,
+                        tooltip: 'Booking History',
+                        onTap: () => BookingHistorySheet.show(context),
+                      ),
+                      const SizedBox(width: 8),
                       _buildHeaderActionButton(
                         icon: Icons.refresh,
                         tooltip: 'Refresh Directory',

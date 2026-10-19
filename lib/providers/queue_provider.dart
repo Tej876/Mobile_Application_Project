@@ -19,6 +19,9 @@ class QueueProvider extends ChangeNotifier {
   List<QueueToken> _adminQueue = [];
   List<QueueToken> get adminQueue => _adminQueue;
 
+  List<QueueToken> _bookingHistory = [];
+  List<QueueToken> get bookingHistory => _bookingHistory;
+
   bool _isLoading = false;
   bool get isLoading => _isLoading;
 
@@ -110,6 +113,24 @@ class QueueProvider extends ChangeNotifier {
       debugPrint("⚠️ [QueueProvider] Error checking active token: $e");
     }
     return null;
+  }
+
+  /// Fetch authenticated patient's booking history via GET /api/queues/history
+  Future<List<QueueToken>> fetchBookingHistory() async {
+    try {
+      final res = await _api.get('/api/queues/history');
+      if (res is Map && res['tokens'] is List) {
+        _bookingHistory = (res['tokens'] as List).map((item) {
+          return QueueToken.fromJson(Map<String, dynamic>.from(item));
+        }).toList();
+        notifyListeners();
+        return _bookingHistory;
+      }
+    } catch (e) {
+      debugPrint("⚠️ [QueueProvider] Error fetching booking history: $e");
+      rethrow;
+    }
+    return [];
   }
 
   /// Patient joins queue via POST /api/queues

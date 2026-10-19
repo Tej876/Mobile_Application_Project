@@ -1,6 +1,7 @@
 class QueueToken {
   final String id;
   final String departmentId;
+  final String departmentName;
   final int tokenNumber;
   final String patientId;
   final String patientName;
@@ -16,6 +17,7 @@ class QueueToken {
   QueueToken({
     required this.id,
     this.departmentId = '',
+    this.departmentName = '',
     required this.tokenNumber,
     required this.patientId,
     required this.patientName,
@@ -60,6 +62,9 @@ class QueueToken {
       departmentId: json['departmentId'] is Map
           ? (json['departmentId']['id'] ?? json['departmentId']['_id'] ?? '')
           : (json['departmentId'] ?? ''),
+      departmentName: (json['departmentName'] as String?) ??
+          (json['departmentId'] is Map ? (json['departmentId']['name'] as String?) : null) ??
+          '',
       tokenNumber: (json['tokenNumber'] as num?)?.toInt() ?? 0,
       patientId: json['patientId'] ?? '',
       patientName: json['patientName'] ?? '',
@@ -83,6 +88,7 @@ class QueueToken {
     return {
       'id': id,
       'departmentId': departmentId,
+      'departmentName': departmentName,
       'tokenNumber': tokenNumber,
       'patientId': patientId,
       'patientName': patientName,
