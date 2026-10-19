@@ -1,30 +1,43 @@
 class AppUser {
-  final String uid;
-  final String role;
+  final String uid; // Maps to Firebase UID
+  final String? mongoId; // MongoDB _id
+  final String role; // 'patient' | 'admin'
   final String name;
   final String email;
 
   AppUser({
     required this.uid,
+    this.mongoId,
     required this.role,
     required this.name,
     required this.email,
   });
 
-  factory AppUser.fromMap(Map<String, dynamic> data, String documentId) {
+  factory AppUser.fromJson(Map<String, dynamic> json, {String? defaultUid}) {
     return AppUser(
-      uid: documentId,
-      role: data['role'] ?? 'patient',
-      name: data['name'] ?? '',
-      email: data['email'] ?? '',
+      uid: json['firebaseUid'] ?? json['uid'] ?? defaultUid ?? '',
+      mongoId: json['id'] ?? json['_id'],
+      role: json['role'] ?? 'patient',
+      name: json['name'] ?? '',
+      email: json['email'] ?? '',
     );
   }
 
-  Map<String, dynamic> toMap() {
+  // Backwards compatibility factory for legacy calls
+  factory AppUser.fromMap(Map<String, dynamic> data, String documentId) {
+    return AppUser.fromJson(data, defaultUid: documentId);
+  }
+
+  Map<String, dynamic> toJson() {
     return {
+      'firebaseUid': uid,
+      'uid': uid,
+      'id': mongoId,
       'role': role,
       'name': name,
       'email': email,
     };
   }
+
+  Map<String, dynamic> toMap() => toJson();
 }

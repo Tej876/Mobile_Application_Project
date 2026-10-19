@@ -1,11 +1,14 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/department.dart';
 import '../models/queue_token.dart';
 import '../models/activity_log.dart';
+import '../services/api_service.dart';
+import '../services/socket_service.dart';
 
 class QueueProvider extends ChangeNotifier {
-  FirebaseFirestore get _firestore => FirebaseFirestore.instance;
+  final ApiService _api = ApiService();
+  final SocketService _socket = SocketService();
 
   List<Department> _departments = [];
   List<Department> get departments => _departments;
@@ -19,93 +22,97 @@ class QueueProvider extends ChangeNotifier {
   bool _isLoading = false;
   bool get isLoading => _isLoading;
 
+  /// Fetch all active departments with their current queue length from MongoDB backend
   Future<void> fetchDepartments() async {
     _isLoading = true;
     notifyListeners();
 
     try {
-      var snapshot = await _firestore.collection('departments').get();
-
-      // Seed common departments if empty
-      if (snapshot.docs.isEmpty) {
-        final standardDepts = [
-          {'name': 'General Medicine', 'avgConsultationMins': 15},
-          {'name': 'Cardiology', 'avgConsultationMins': 20},
-          {'name': 'Orthopedics', 'avgConsultationMins': 25},
-          {'name': 'Pediatrics', 'avgConsultationMins': 15},
-          {'name': 'Dermatology', 'avgConsultationMins': 10},
-          {'name': 'Neurology', 'avgConsultationMins': 30},
-        ];
-
-        final batch = _firestore.batch();
-        for (var dept in standardDepts) {
-          final doc = _firestore.collection('departments').doc();
-          batch.set(doc, dept);
-        }
-        await batch.commit();
-        snapshot = await _firestore.collection('departments').get();
+      final res = await _api.get('/api/departments');
+      if (res is Map && res['departments'] is List) {
+        _departments = (res['departments'] as List)
+            .map((item) => Department.fromJson(Map<String, dynamic>.from(item)))
+            .toList();
       }
-
-      _departments = snapshot.docs
-          .map((doc) => Department.fromMap(doc.data(), doc.id))
-          .toList();
     } catch (e) {
-      debugPrint("Error fetching departments: $e");
+      debugPrint("⚠️ [QueueProvider] Error fetching departments: $e");
     } finally {
       _isLoading = false;
       notifyListeners();
     }
   }
 
-  // Stream active queue length for department selection screen
+  /// Live stream of active queue length for a department (combining REST + Socket.IO updates)
   Stream<int> listenToDepartmentQueueLength(String departmentId) {
-    return _firestore
-        .collection('departments')
-        .doc(departmentId)
-        .collection('queue')
-        .snapshots()
-        .map((snapshot) {
-      return snapshot.docs.where((doc) {
-        final status = doc.data()['status'] as String?;
-        return status == 'waiting' || status == 'called';
-      }).length;
-    });
+    late StreamController<int> controller;
+    StreamSubscription? socketSub;
+
+    controller = StreamController<int>(
+      onListen: () async {
+        // Initial fetch
+        try {
+          final res = await _api.get('/api/departments');
+          if (res is Map && res['departments'] is List) {
+            final deptJson = (res['departments'] as List).firstWhere(
+              (d) => d['id'] == departmentId || d['_id'] == departmentId,
+              orElse: () => null,
+            );
+            if (deptJson != null && !controller.isClosed) {
+              final count = (deptJson['activeQueueLength'] as num?)?.toInt() ?? 0;
+              controller.add(count);
+            }
+          }
+        } catch (_) {}
+
+        // Listen for live queue updates via Socket.IO
+        socketSub = _socket.onQueueUpdated.listen((data) async {
+          if (controller.isClosed) return;
+          if (data['departmentId'] == departmentId) {
+            try {
+              final res = await _api.get('/api/departments');
+              if (res is Map && res['departments'] is List && !controller.isClosed) {
+                final deptJson = (res['departments'] as List).firstWhere(
+                  (d) => d['id'] == departmentId || d['_id'] == departmentId,
+                  orElse: () => null,
+                );
+                if (deptJson != null) {
+                  final count = (deptJson['activeQueueLength'] as num?)?.toInt() ?? 0;
+                  controller.add(count);
+                }
+              }
+            } catch (_) {}
+          }
+        });
+      },
+      onCancel: () {
+        socketSub?.cancel();
+        controller.close();
+      },
+    );
+
+    return controller.stream;
   }
 
-  // Check if patient already has an active token across departments
+  /// Check if patient already has an active token across departments
   Future<Map<String, dynamic>?> findActivePatientToken(String patientId) async {
     try {
-      if (_departments.isEmpty) {
-        await fetchDepartments();
-      }
-      for (var dept in _departments) {
-        final snap = await _firestore
-            .collection('departments')
-            .doc(dept.id)
-            .collection('queue')
-            .where('patientId', isEqualTo: patientId)
-            .get();
-
-        for (var doc in snap.docs) {
-          final status = doc.data()['status'] as String?;
-          if (status == 'waiting' || status == 'called') {
-            final token = QueueToken.fromMap(doc.data(), doc.id);
-            _currentPatientToken = token;
-            return {
-              'departmentId': dept.id,
-              'departmentName': dept.name,
-              'token': token,
-            };
-          }
-        }
+      final res = await _api.get('/api/queues/active');
+      if (res is Map && res['hasActiveToken'] == true && res['token'] != null) {
+        final token = QueueToken.fromJson(Map<String, dynamic>.from(res['token']));
+        _currentPatientToken = token;
+        return {
+          'departmentId': token.departmentId,
+          'departmentName': res['token']['departmentName'] ?? 'Department',
+          'token': token,
+        };
       }
     } catch (e) {
-      debugPrint("Error finding active token: $e");
+      debugPrint("⚠️ [QueueProvider] Error checking active token: $e");
     }
     return null;
   }
 
-  // PATIENT FLOW
+  /// Patient joins queue via POST /api/queues
   Future<QueueToken?> joinQueue(
     String departmentId,
     String patientId,
@@ -115,58 +122,20 @@ class QueueProvider extends ChangeNotifier {
       _isLoading = true;
       notifyListeners();
 
-      final queueRef = _firestore
-          .collection('departments')
-          .doc(departmentId)
-          .collection('queue');
-
-      // Check if patient already has an active token
-      final existing = await queueRef
-          .where('patientId', isEqualTo: patientId)
-          .get();
-
-      final hasActive = existing.docs.any((doc) {
-        final status = doc.data()['status'] as String?;
-        return status == 'waiting' || status == 'called';
+      final res = await _api.post('/api/queues', {
+        'departmentId': departmentId,
+        'patientName': patientName,
       });
 
-      if (hasActive) {
-        final activeDoc = existing.docs.firstWhere((doc) {
-          final status = doc.data()['status'] as String?;
-          return status == 'waiting' || status == 'called';
-        });
-        _currentPatientToken = QueueToken.fromMap(activeDoc.data(), activeDoc.id);
-        return _currentPatientToken;
+      if (res is Map && res['token'] != null) {
+        final token = QueueToken.fromJson(Map<String, dynamic>.from(res['token']));
+        _currentPatientToken = token;
+        _socket.joinDepartment(departmentId);
+        return token;
       }
-
-      // Next waiting token number: if 0 waiting, starts at 1!
-      final waitingSnap = await queueRef
-          .where('status', isEqualTo: 'waiting')
-          .get();
-
-      int nextTokenNumber = waitingSnap.docs.length + 1;
-
-      final newTokenRef = queueRef.doc();
-      final newToken = QueueToken(
-        id: newTokenRef.id,
-        tokenNumber: nextTokenNumber,
-        patientId: patientId,
-        patientName: patientName,
-        status: 'waiting',
-        joinedAt: DateTime.now(),
-        notifiedAt: null,
-      );
-
-      await newTokenRef.set(newToken.toMap());
-      
-      // Fix race condition: immediately recalculate token numbers so simultaneous bookings 
-      // get deterministically sorted by their joinedAt timestamp.
-      await _recalculateTokenNumbers(departmentId);
-      
-      _currentPatientToken = newToken;
-      return newToken;
+      return null;
     } catch (e) {
-      debugPrint("Error joining queue: $e");
+      debugPrint("⚠️ [QueueProvider] Error joining queue: $e");
       rethrow;
     } finally {
       _isLoading = false;
@@ -174,87 +143,66 @@ class QueueProvider extends ChangeNotifier {
     }
   }
 
+  /// Real-time stream for patient's own token in a department
   Stream<QueueToken?> listenToPatientToken(String departmentId, String patientId) {
-    return _firestore
-        .collection('departments')
-        .doc(departmentId)
-        .collection('queue')
-        .where('patientId', isEqualTo: patientId)
-        .snapshots()
-        .map((snapshot) {
-      final activeDocs = snapshot.docs.where((doc) {
-        final status = doc.data()['status'] as String?;
-        return status == 'waiting' || status == 'called';
-      }).toList();
+    late StreamController<QueueToken?> controller;
+    final List<StreamSubscription> subscriptions = [];
 
-      if (activeDocs.isNotEmpty) {
-        activeDocs.sort((a, b) {
-          // Called first, then lowest token number
-          final aStatus = a.data()['status'] as String?;
-          final bStatus = b.data()['status'] as String?;
-          if (aStatus == 'called' && bStatus != 'called') return -1;
-          if (bStatus == 'called' && aStatus != 'called') return 1;
-          final aNum = a.data()['tokenNumber'] as int? ?? 0;
-          final bNum = b.data()['tokenNumber'] as int? ?? 0;
-          return aNum.compareTo(bNum);
-        });
+    controller = StreamController<QueueToken?>(
+      onListen: () async {
+        _socket.joinDepartment(departmentId);
 
-        _currentPatientToken = QueueToken.fromMap(activeDocs.first.data(), activeDocs.first.id);
-        return _currentPatientToken;
-      }
+        // Fetch current active token
+        Future<void> refresh() async {
+          if (controller.isClosed) return;
+          try {
+            final res = await _api.get('/api/queues/active');
+            if (res is Map && !controller.isClosed) {
+              if (res['hasActiveToken'] == true && res['token'] != null) {
+                final token = QueueToken.fromJson(Map<String, dynamic>.from(res['token']));
+                _currentPatientToken = token;
+                controller.add(token);
+              } else {
+                // If not active, check history for most recent token (e.g. just served or cancelled)
+                final histRes = await _api.get('/api/queues/history');
+                if (histRes is Map && histRes['tokens'] is List && (histRes['tokens'] as List).isNotEmpty) {
+                  final latestToken = QueueToken.fromJson(
+                    Map<String, dynamic>.from((histRes['tokens'] as List).first),
+                  );
+                  _currentPatientToken = latestToken;
+                  controller.add(latestToken);
+                } else {
+                  _currentPatientToken = null;
+                  controller.add(null);
+                }
+              }
+            }
+          } catch (e) {
+            debugPrint("⚠️ [QueueProvider] Token refresh error: $e");
+          }
+        }
 
-      // If finished (served or no_show), return latest
-      if (snapshot.docs.isNotEmpty) {
-        final sortedDocs = snapshot.docs.toList()
-          ..sort((a, b) {
-            final aDate = (a.data()['joinedAt'] as Timestamp?)?.toDate() ?? DateTime.now();
-            final bDate = (b.data()['joinedAt'] as Timestamp?)?.toDate() ?? DateTime.now();
-            return bDate.compareTo(aDate);
-          });
-        return QueueToken.fromMap(sortedDocs.first.data(), sortedDocs.first.id);
-      }
+        await refresh();
 
-      _currentPatientToken = null;
-      return null;
-    });
+        // Listen for live socket events
+        subscriptions.add(_socket.onQueueUpdated.listen((_) => refresh()));
+        subscriptions.add(_socket.onTokenCreated.listen((_) => refresh()));
+        subscriptions.add(_socket.onTokenCalled.listen((_) => refresh()));
+        subscriptions.add(_socket.onTokenCancelled.listen((_) => refresh()));
+        subscriptions.add(_socket.onTokenCompleted.listen((_) => refresh()));
+      },
+      onCancel: () {
+        for (var sub in subscriptions) {
+          sub.cancel();
+        }
+        controller.close();
+      },
+    );
+
+    return controller.stream;
   }
 
-  // Recalculates waiting tokens so the first in line is ALWAYS #1, second is #2...
-  Future<void> _recalculateTokenNumbers(
-    String departmentId, {
-    String? excludeTokenId,
-    WriteBatch? batch,
-  }) async {
-    final queueRef = _firestore
-        .collection('departments')
-        .doc(departmentId)
-        .collection('queue');
-
-    final snapshot = await queueRef
-        .where('status', isEqualTo: 'waiting')
-        .get();
-
-    final docs = snapshot.docs.where((doc) => doc.id != excludeTokenId).toList();
-    docs.sort((a, b) {
-      final aDate = (a.data()['joinedAt'] as Timestamp?)?.toDate() ?? DateTime.now();
-      final bDate = (b.data()['joinedAt'] as Timestamp?)?.toDate() ?? DateTime.now();
-      return aDate.compareTo(bDate);
-    });
-
-    final commitBatch = batch ?? _firestore.batch();
-    int currentToken = 1;
-    for (var doc in docs) {
-      if (doc.data()['tokenNumber'] != currentToken) {
-        commitBatch.update(doc.reference, {'tokenNumber': currentToken});
-      }
-      currentToken++;
-    }
-
-    if (batch == null) {
-      await commitBatch.commit();
-    }
-  }
-
+  /// Patient cancels token via PATCH /api/queues/:id/cancel
   Future<void> cancelToken(
     String departmentId,
     String tokenId,
@@ -262,182 +210,150 @@ class QueueProvider extends ChangeNotifier {
     String patientName,
   ) async {
     try {
-      final batch = _firestore.batch();
+      _isLoading = true;
+      notifyListeners();
 
-      // 1. Update Token status to cancelled
-      final tokenRef = _firestore
-          .collection('departments')
-          .doc(departmentId)
-          .collection('queue')
-          .doc(tokenId);
-      batch.update(tokenRef, {'status': 'cancelled'});
-
-      // 2. Add Activity Log
-      final logRef = _firestore
-          .collection('departments')
-          .doc(departmentId)
-          .collection('activityLog')
-          .doc();
-      batch.set(logRef, {
-        'tokenNumber': tokenNumber,
-        'patientName': patientName,
-        'action': 'cancelled',
-        'timestamp': FieldValue.serverTimestamp(),
-      });
-
-      // 3. Renumber remaining waiting tokens so the next waiting patient is #1!
-      await _recalculateTokenNumbers(departmentId, excludeTokenId: tokenId, batch: batch);
-
-      await batch.commit();
+      await _api.patch('/api/queues/$tokenId/cancel');
       _currentPatientToken = null;
       notifyListeners();
     } catch (e) {
-      debugPrint("Error cancelling token: $e");
+      debugPrint("⚠️ [QueueProvider] Error cancelling token: $e");
       rethrow;
+    } finally {
+      _isLoading = false;
+      notifyListeners();
     }
   }
 
+  /// Update notification timestamp on server via PATCH /api/queues/:id/notified
   Future<void> updateNotifiedAt(String departmentId, String tokenId) async {
-    await _firestore
-        .collection('departments')
-        .doc(departmentId)
-        .collection('queue')
-        .doc(tokenId)
-        .update({
-      'notifiedAt': FieldValue.serverTimestamp(),
-    });
+    try {
+      await _api.patch('/api/queues/$tokenId/notified');
+    } catch (e) {
+      debugPrint("⚠️ [QueueProvider] Error updating notifiedAt: $e");
+    }
   }
 
-  // ADMIN FLOW
+  /// ADMIN FLOW: Live queue stream for clinic admin dashboard
   Stream<List<QueueToken>> listenToAdminQueue(String departmentId) {
-    return _firestore
-        .collection('departments')
-        .doc(departmentId)
-        .collection('queue')
-        .snapshots()
-        .map((snapshot) {
-      final activeTokens = snapshot.docs.where((doc) {
-        final status = doc.data()['status'] as String?;
-        return status == 'waiting' || status == 'called';
-      }).toList();
+    late StreamController<List<QueueToken>> controller;
+    final List<StreamSubscription> subscriptions = [];
 
-      activeTokens.sort((a, b) {
-        // Called first, then waiting by tokenNumber
-        final aStatus = a.data()['status'] as String?;
-        final bStatus = b.data()['status'] as String?;
-        if (aStatus == 'called' && bStatus != 'called') return -1;
-        if (bStatus == 'called' && aStatus != 'called') return 1;
-        final aNum = a.data()['tokenNumber'] as int? ?? 0;
-        final bNum = b.data()['tokenNumber'] as int? ?? 0;
-        return aNum.compareTo(bNum);
-      });
+    controller = StreamController<List<QueueToken>>(
+      onListen: () async {
+        _socket.joinDepartment(departmentId);
 
-      _adminQueue = activeTokens
-          .map((doc) => QueueToken.fromMap(doc.data(), doc.id))
-          .toList();
+        Future<void> fetchQueue() async {
+          if (controller.isClosed) return;
+          try {
+            final res = await _api.get('/api/admin/queues/$departmentId');
+            if (res is Map && res['queue'] is List && !controller.isClosed) {
+              _adminQueue = (res['queue'] as List)
+                  .map((item) => QueueToken.fromJson(Map<String, dynamic>.from(item)))
+                  .toList();
+              controller.add(_adminQueue);
+            } else if (!controller.isClosed) {
+              _adminQueue = [];
+              controller.add([]);
+            }
+          } catch (e) {
+            debugPrint("⚠️ [QueueProvider] Admin queue fetch error: $e");
+            if (!controller.isClosed) {
+              controller.add(_adminQueue);
+            }
+          }
+        }
 
-      return _adminQueue;
-    });
+        await fetchQueue();
+
+        subscriptions.add(_socket.onQueueUpdated.listen((_) => fetchQueue()));
+        subscriptions.add(_socket.onTokenCreated.listen((_) => fetchQueue()));
+        subscriptions.add(_socket.onTokenCalled.listen((_) => fetchQueue()));
+        subscriptions.add(_socket.onTokenCancelled.listen((_) => fetchQueue()));
+        subscriptions.add(_socket.onTokenCompleted.listen((_) => fetchQueue()));
+      },
+      onCancel: () {
+        for (var sub in subscriptions) {
+          sub.cancel();
+        }
+        _socket.leaveDepartment(departmentId);
+        controller.close();
+      },
+    );
+
+    return controller.stream;
   }
 
+  /// ADMIN FLOW: Live activity log stream
   Stream<List<ActivityLog>> listenToActivityLog(String departmentId) {
-    return _firestore
-        .collection('departments')
-        .doc(departmentId)
-        .collection('activityLog')
-        .orderBy('timestamp', descending: true)
-        .limit(30)
-        .snapshots()
-        .map((snapshot) {
-      return snapshot.docs
-          .map((doc) => ActivityLog.fromMap(doc.data(), doc.id))
-          .toList();
-    });
+    late StreamController<List<ActivityLog>> controller;
+    final List<StreamSubscription> subscriptions = [];
+
+    controller = StreamController<List<ActivityLog>>(
+      onListen: () async {
+        Future<void> fetchLogs() async {
+          if (controller.isClosed) return;
+          try {
+            final res = await _api.get('/api/admin/activity/$departmentId');
+            if (res is Map && res['activityLogs'] is List && !controller.isClosed) {
+              final logs = (res['activityLogs'] as List)
+                  .map((item) => ActivityLog.fromJson(Map<String, dynamic>.from(item)))
+                  .toList();
+              controller.add(logs);
+            } else if (!controller.isClosed) {
+              controller.add([]);
+            }
+          } catch (e) {
+            debugPrint("⚠️ [QueueProvider] Activity log fetch error: $e");
+            if (!controller.isClosed) {
+              controller.add([]);
+            }
+          }
+        }
+
+        await fetchLogs();
+
+        subscriptions.add(_socket.onQueueUpdated.listen((_) => fetchLogs()));
+        subscriptions.add(_socket.onTokenCompleted.listen((_) => fetchLogs()));
+        subscriptions.add(_socket.onTokenCancelled.listen((_) => fetchLogs()));
+      },
+      onCancel: () {
+        for (var sub in subscriptions) {
+          sub.cancel();
+        }
+        controller.close();
+      },
+    );
+
+    return controller.stream;
   }
 
-  // Calls next waiting patient and shifts remaining waiting tokens so the next person becomes #1!
+  /// ADMIN FLOW: Call next patient in queue via PATCH /api/admin/queues/:deptId/call-next
   Future<void> callNextPatient(String departmentId) async {
     try {
-      final queueRef = _firestore
-          .collection('departments')
-          .doc(departmentId)
-          .collection('queue');
-
-      final snap = await queueRef
-          .where('status', isEqualTo: 'waiting')
-          .get();
-
-      if (snap.docs.isEmpty) {
-        debugPrint("No waiting patients in queue.");
-        return;
-      }
-
-      final docs = snap.docs.toList();
-      docs.sort((a, b) {
-        final aNum = a.data()['tokenNumber'] as int? ?? 0;
-        final bNum = b.data()['tokenNumber'] as int? ?? 0;
-        return aNum.compareTo(bNum);
-      });
-
-      final nextWaitingDoc = docs.first;
-      final batch = _firestore.batch();
-
-      // 1. Mark this waiting patient as 'called'
-      batch.update(nextWaitingDoc.reference, {'status': 'called'});
-
-      // 2. Renumber remaining waiting patients: the new first waiting person becomes #1!
-      int nextNum = 1;
-      for (int i = 1; i < docs.length; i++) {
-        batch.update(docs[i].reference, {'tokenNumber': nextNum});
-        nextNum++;
-      }
-
-      await batch.commit();
+      await _api.patch('/api/admin/queues/$departmentId/call-next');
       notifyListeners();
     } catch (e) {
-      debugPrint("Error calling next patient: $e");
+      debugPrint("⚠️ [QueueProvider] Error calling next patient: $e");
       rethrow;
     }
   }
 
-  // Marks patient as served or no-show and renumbers remaining waiting tokens
+  /// ADMIN FLOW: Complete consultation (served or no-show)
   Future<void> markTokenDone(
     String departmentId,
     QueueToken token,
     bool isNoShow,
   ) async {
     try {
-      final batch = _firestore.batch();
-      final status = isNoShow ? 'no_show' : 'served';
+      final endpoint = isNoShow
+          ? '/api/admin/queues/${token.id}/no-show'
+          : '/api/admin/queues/${token.id}/complete';
 
-      // 1. Update Token status
-      final tokenRef = _firestore
-          .collection('departments')
-          .doc(departmentId)
-          .collection('queue')
-          .doc(token.id);
-      batch.update(tokenRef, {'status': status});
-
-      // 2. Activity Log
-      final logRef = _firestore
-          .collection('departments')
-          .doc(departmentId)
-          .collection('activityLog')
-          .doc();
-      batch.set(logRef, {
-        'tokenNumber': token.tokenNumber,
-        'patientName': token.patientName,
-        'action': status,
-        'timestamp': FieldValue.serverTimestamp(),
-      });
-
-      // 3. Recalculate remaining waiting tokens so the first in line is #1
-      await _recalculateTokenNumbers(departmentId, excludeTokenId: token.id, batch: batch);
-
-      await batch.commit();
+      await _api.patch(endpoint);
       notifyListeners();
     } catch (e) {
-      debugPrint("Error marking done: $e");
+      debugPrint("⚠️ [QueueProvider] Error marking token done: $e");
       rethrow;
     }
   }

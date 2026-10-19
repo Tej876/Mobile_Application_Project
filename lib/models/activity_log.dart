@@ -1,10 +1,8 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-
 class ActivityLog {
   final String id;
   final int tokenNumber;
   final String patientName;
-  final String action; // "served" | "no_show" | "cancelled"
+  final String action; // "served" | "no_show" | "cancelled" | "token_called" etc.
   final DateTime timestamp;
 
   ActivityLog({
@@ -15,22 +13,41 @@ class ActivityLog {
     required this.timestamp,
   });
 
-  factory ActivityLog.fromMap(Map<String, dynamic> data, String documentId) {
+  static DateTime _parseDate(dynamic val) {
+    if (val == null) return DateTime.now();
+    if (val is DateTime) return val;
+    if (val is String) return DateTime.tryParse(val) ?? DateTime.now();
+    if (val is int) return DateTime.fromMillisecondsSinceEpoch(val);
+    try {
+      final dynamic ts = val;
+      if (ts.toDate != null) return ts.toDate();
+    } catch (_) {}
+    return DateTime.now();
+  }
+
+  factory ActivityLog.fromJson(Map<String, dynamic> json, {String? defaultId}) {
     return ActivityLog(
-      id: documentId,
-      tokenNumber: data['tokenNumber']?.toInt() ?? 0,
-      patientName: data['patientName'] ?? '',
-      action: data['action'] ?? '',
-      timestamp: (data['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      id: json['id'] ?? json['_id'] ?? defaultId ?? '',
+      tokenNumber: (json['tokenNumber'] as num?)?.toInt() ?? 0,
+      patientName: json['patientName'] ?? '',
+      action: json['action'] ?? '',
+      timestamp: _parseDate(json['timestamp']),
     );
   }
 
-  Map<String, dynamic> toMap() {
+  factory ActivityLog.fromMap(Map<String, dynamic> data, String documentId) {
+    return ActivityLog.fromJson(data, defaultId: documentId);
+  }
+
+  Map<String, dynamic> toJson() {
     return {
+      'id': id,
       'tokenNumber': tokenNumber,
       'patientName': patientName,
       'action': action,
-      'timestamp': Timestamp.fromDate(timestamp),
+      'timestamp': timestamp.toIso8601String(),
     };
   }
+
+  Map<String, dynamic> toMap() => toJson();
 }

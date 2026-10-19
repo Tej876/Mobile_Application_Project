@@ -1,23 +1,19 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:http/http.dart' as http;
 
 /// Service for sending booking confirmation emails to patients.
 ///
 /// Features:
 /// 1. Formats exact subject and body requested by the clinic faculty.
-/// 2. Records a persistent audit log in Cloud Firestore for database review.
-/// 3. Supports instant inbox delivery via EmailJS or any REST mailer.
-/// 4. Non-blocking & failsafe — never halts the UI or booking transaction.
+/// 2. Supports instant inbox delivery via EmailJS or any REST mailer.
+/// 3. Non-blocking & failsafe — never halts the UI or booking transaction.
 class EmailService {
   static final EmailService _instance = EmailService._internal();
   factory EmailService() => _instance;
   EmailService._internal();
 
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-
-  // Optional: If you create a free account on https://www.emailjs.com (free 200 emails/mo),
+  // EmailJS credentials (free tier or configured server-side)
   static const String emailJsServiceId = 'service_iy98qhl';
   static const String emailJsTemplateId = 'template_spgddsr';
   static const String emailJsPublicKey = 'r7ycTTdlaXk_DEniC';
@@ -29,7 +25,7 @@ class EmailService {
   /// [departmentName] Chosen clinic department.
   /// [tokenNumber] Dynamic queue token number assigned (#1, #2, etc.).
   /// [estWaitMins] Calculated estimated wait time in minutes.
-  /// [departmentId] Department document ID for Firestore activity logging.
+  /// [departmentId] Department document ID.
   Future<bool> sendBookingConfirmation({
     required String recipientEmail,
     required String patientName,
@@ -58,30 +54,7 @@ Thank you for using QueueLess!''';
 
     bool sentSuccessfully = false;
 
-    // 1. Audit trail in Cloud Firestore (for viva/evaluation proof in Firebase Console)
-    try {
-      await _firestore
-          .collection('departments')
-          .doc(departmentId)
-          .collection('activityLog')
-          .add({
-        'action': 'CONFIRMATION_EMAIL_SENT',
-        'recipientEmail': recipientEmail,
-        'patientName': patientName,
-        'departmentName': departmentName,
-        'tokenNumber': tokenNumber,
-        'estWaitMins': estWaitMins,
-        'subject': subject,
-        'body': body,
-        'timestamp': FieldValue.serverTimestamp(),
-      });
-      debugPrint('📧 [EmailService] Firestore audit log written successfully.');
-      sentSuccessfully = true;
-    } catch (e) {
-      debugPrint('⚠️ [EmailService] Firestore log error: $e');
-    }
-
-    // 2. Dispatch via EmailJS if configured
+    // Dispatch via EmailJS if credentials are present
     if (emailJsServiceId.isNotEmpty &&
         emailJsTemplateId.isNotEmpty &&
         emailJsPublicKey.isNotEmpty) {
@@ -119,7 +92,7 @@ Thank you for using QueueLess!''';
         debugPrint('⚠️ [EmailService] HTTP delivery error: $e');
       }
     } else {
-      debugPrint('ℹ️ [EmailService] EmailJS credentials not set. Email logged to Firestore & UI.');
+      debugPrint('ℹ️ [EmailService] EmailJS credentials not set.');
     }
 
     return sentSuccessfully;

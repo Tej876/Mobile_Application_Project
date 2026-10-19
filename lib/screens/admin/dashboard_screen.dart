@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../providers/queue_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../models/queue_token.dart';
+import '../../models/activity_log.dart';
 import '../../theme/app_theme.dart';
 import '../auth_screen.dart';
 
@@ -17,6 +18,8 @@ class AdminDashboardScreen extends StatefulWidget {
 class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   String? _selectedDepartmentId;
   int _currentIndex = 0;
+  Stream<List<QueueToken>>? _adminQueueStream;
+  Stream<List<ActivityLog>>? _activityLogStream;
 
   @override
   void initState() {
@@ -25,10 +28,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       final queue = Provider.of<QueueProvider>(context, listen: false);
       await queue.fetchDepartments();
       if (queue.departments.isNotEmpty && mounted) {
-        setState(() {
-          _selectedDepartmentId = queue.departments.first.id;
-        });
+        _selectDepartment(queue.departments.first.id);
       }
+    });
+  }
+
+  void _selectDepartment(String deptId) {
+    if (_selectedDepartmentId == deptId && _adminQueueStream != null) return;
+    setState(() {
+      _selectedDepartmentId = deptId;
+      final queue = Provider.of<QueueProvider>(context, listen: false);
+      _adminQueueStream = queue.listenToAdminQueue(deptId);
+      _activityLogStream = queue.listenToActivityLog(deptId);
     });
   }
 
@@ -38,6 +49,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   Widget build(BuildContext context) {
     final queue = Provider.of<QueueProvider>(context);
     final auth = Provider.of<AuthProvider>(context, listen: false);
+
+    if (_selectedDepartmentId == null && queue.departments.isNotEmpty) {
+      _selectedDepartmentId = queue.departments.first.id;
+      _adminQueueStream = queue.listenToAdminQueue(_selectedDepartmentId!);
+      _activityLogStream = queue.listenToActivityLog(_selectedDepartmentId!);
+    }
 
     return Scaffold(
       body: SafeArea(
@@ -134,8 +151,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                             final d = queue.departments[index];
                             final selected = d.id == _selectedDepartmentId;
                             return GestureDetector(
-                              onTap: () =>
-                                  setState(() => _selectedDepartmentId = d.id),
+                              onTap: () => _selectDepartment(d.id),
                               child: AnimatedContainer(
                                 duration: const Duration(milliseconds: 160),
                                 padding: const EdgeInsets.symmetric(
@@ -248,11 +264,25 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   }
 
   Widget _buildQueueView(QueueProvider queue) {
+    final stream = _adminQueueStream ??
+        (_selectedDepartmentId != null
+            ? queue.listenToAdminQueue(_selectedDepartmentId!)
+            : null);
+
     return StreamBuilder<List<QueueToken>>(
-      stream: queue.listenToAdminQueue(_selectedDepartmentId!),
+      stream: stream,
       builder: (streamCtx, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
+        if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
           return const Center(child: CircularProgressIndicator());
+        }
+
+        if (snapshot.hasError) {
+          return Center(
+            child: Text(
+              'Error loading queue: ${snapshot.error}',
+              style: const TextStyle(color: AppTheme.errorColor),
+            ),
+          );
         }
 
         final tokens = snapshot.data ?? [];
@@ -463,11 +493,25 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   }
 
   Widget _buildActivityLogView(QueueProvider queue) {
-    return StreamBuilder(
-      stream: queue.listenToActivityLog(_selectedDepartmentId!),
+    final stream = _activityLogStream ??
+        (_selectedDepartmentId != null
+            ? queue.listenToActivityLog(_selectedDepartmentId!)
+            : null);
+
+    return StreamBuilder<List<ActivityLog>>(
+      stream: stream,
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
+        if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
           return const Center(child: CircularProgressIndicator());
+        }
+
+        if (snapshot.hasError) {
+          return Center(
+            child: Text(
+              'Error loading activity log: ${snapshot.error}',
+              style: const TextStyle(color: AppTheme.errorColor),
+            ),
+          );
         }
 
         final logs = snapshot.data ?? [];

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/queue_provider.dart';
 import '../../providers/auth_provider.dart';
+import '../../models/queue_token.dart';
 import '../../services/notification_service.dart';
 import '../../theme/app_theme.dart';
 import 'select_department_screen.dart';
@@ -17,6 +18,7 @@ class LiveStatusScreen extends StatefulWidget {
 class _LiveStatusScreenState extends State<LiveStatusScreen> {
   int? _lastNotifiedPosition;
   bool _hasNotifiedCalled = false;
+  Stream<QueueToken?>? _tokenStream;
 
   @override
   void initState() {
@@ -146,13 +148,13 @@ class _LiveStatusScreenState extends State<LiveStatusScreen> {
                 ),
 
                 Expanded(
-                  child: StreamBuilder(
-                    stream: queue.listenToPatientToken(
+                  child: StreamBuilder<QueueToken?>(
+                    stream: _tokenStream ??= queue.listenToPatientToken(
                       widget.departmentId,
                       auth.currentUser!.uid,
                     ),
                     builder: (context, snapshot) {
-                      if (snapshot.connectionState == ConnectionState.waiting) {
+                      if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
                         return const Center(child: CircularProgressIndicator());
                       }
 
