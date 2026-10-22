@@ -17,7 +17,7 @@ const deptSchema = z.object({
  * GET /api/departments
  * Fetch all active departments along with their current waiting queue count
  */
-router.get('/', verifyToken, async (req, res, next) => {
+router.get('/', async (req, res, next) => {
   try {
     let departments = await Department.find({ isActive: true }).sort({ name: 1 });
 

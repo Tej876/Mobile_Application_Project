@@ -1,0 +1,15 @@
+{
+  "name": "queueless",
+  "version": "1.0.0",
+  "description": "QueueLess — Real-Time Clinic & Outpatient Queue Dispatch System",
+  "scripts": {
+    "start": "npm --prefix backend start",
+    "dev": "npm --prefix backend run dev",
+    "seed": "npm --prefix backend run seed",
+    "test": "npm --prefix backend test",
+    "backend": "npm --prefix backend start",
+    "backend:test": "npm --prefix backend test",
+    "flutter:run": "flutter run",
+    "flutter:test": "flutter test"
+  }
+}

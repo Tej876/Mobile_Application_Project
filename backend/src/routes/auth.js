@@ -19,20 +19,14 @@ const profileSchema = z.object({
  */
 router.get('/me', verifyToken, async (req, res, next) => {
   try {
-    let user = await User.findOne({ firebaseUid: req.user.uid });
+    const user = await User.findOne({ firebaseUid: req.user.uid });
 
     if (!user) {
-      // Auto-provision profile in MongoDB for existing accounts
-      const email = req.user.email || '';
-      const isAdmin = email.toLowerCase().includes('admin');
-      user = await User.create({
-        firebaseUid: req.user.uid,
-        name: req.user.name || (isAdmin ? 'Admin' : 'Patient'),
-        email: email,
-        role: isAdmin ? 'admin' : 'patient',
-        createdAt: new Date(),
+      return res.status(404).json({
+        success: false,
+        error: 'User not found',
+        message: 'No account found in MongoDB database for this user. Please register first.',
       });
-      console.log(`👤 [Auth] Auto-provisioned MongoDB profile for ${email} with role: ${user.role}`);
     }
 
     res.json({
@@ -54,8 +48,8 @@ router.get('/me', verifyToken, async (req, res, next) => {
 /**
  * POST /api/users/me
  * Create or sync own user profile on first login / registration
- * Enforces Security Requirement: Public registration ALWAYS creates a 'patient' role.
- * 'admin' role requires explicit verification via ADMIN_BOOTSTRAP_SECRET or existing admin authority.
+ * Enforces Security Requirement: Patient registration ALWAYS creates 'patient'.
+ * 'admin' role requires explicit verification via ADMIN_BOOTSTRAP_SECRET.
  */
 router.post('/me', verifyToken, validateBody(profileSchema), async (req, res, next) => {
   try {
@@ -68,20 +62,22 @@ router.post('/me', verifyToken, validateBody(profileSchema), async (req, res, ne
     let assignedRole = 'patient';
     const serverBootstrapSecret = process.env.ADMIN_BOOTSTRAP_SECRET || 'queueless_admin_bootstrap_secret_2026';
 
+    const secretMatches = Boolean(adminSecret && adminSecret === serverBootstrapSecret);
+
     if (role === 'admin') {
-      if (adminSecret && adminSecret === serverBootstrapSecret) {
+      if (secretMatches) {
         assignedRole = 'admin';
         console.log(`🛡️ [Auth] Admin role granted to ${email} via valid bootstrap secret`);
       } else if (existingUser && existingUser.role === 'admin') {
         assignedRole = 'admin'; // retain existing verified admin
       } else {
-        // Enforce security requirement: Reject unauthorized role elevation silently or fallback to patient
+        // Enforce security requirement: Reject unauthorized role elevation and force patient
         console.warn(`⚠️ [Auth] Security: Unauthorized attempt to register as admin by ${email}. Forcing 'patient'.`);
         assignedRole = 'patient';
       }
-    } else if (existingUser) {
-      // Preserve existing role if already set
-      assignedRole = existingUser.role;
+    } else {
+      // Role is 'patient' or unspecified
+      assignedRole = 'patient';
     }
 
     if (existingUser) {
@@ -110,6 +106,19 @@ router.post('/me', verifyToken, validateBody(profileSchema), async (req, res, ne
       message: 'Profile created in MongoDB',
       user: newUser,
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * DELETE /api/users/me
+ * Delete own user profile from MongoDB
+ */
+router.delete('/me', verifyToken, async (req, res, next) => {
+  try {
+    await User.deleteOne({ firebaseUid: req.user.uid });
+    res.json({ success: true, message: 'User profile deleted from MongoDB' });
   } catch (error) {
     next(error);
   }

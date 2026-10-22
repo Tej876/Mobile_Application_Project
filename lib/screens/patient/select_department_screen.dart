@@ -11,6 +11,7 @@ import '../../theme/app_theme.dart';
 import 'live_status_screen.dart';
 import 'booking_history_sheet.dart';
 import '../auth_screen.dart';
+import '../admin/dashboard_screen.dart';
 
 class SelectDepartmentScreen extends StatefulWidget {
   const SelectDepartmentScreen({super.key});
@@ -35,15 +36,36 @@ class _SelectDepartmentScreenState extends State<SelectDepartmentScreen> {
     final queue = Provider.of<QueueProvider>(context, listen: false);
     final auth = Provider.of<AuthProvider>(context, listen: false);
 
-    await queue.fetchDepartments();
+    try {
+      await auth.refreshProfile();
+    } catch (_) {}
+
+    if (auth.currentUser?.role == 'admin' && mounted) {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => const AdminDashboardScreen()),
+      );
+      return;
+    }
+
+    try {
+      await queue.fetchDepartments();
+    } catch (_) {}
 
     if (auth.currentUser != null) {
-      final active = await queue.findActivePatientToken(auth.currentUser!.uid);
-      if (mounted) {
-        setState(() {
-          _activeTokenInfo = active;
-          _isCheckingActiveToken = false;
-        });
+      try {
+        final active = await queue.findActivePatientToken(auth.currentUser!.uid);
+        if (mounted) {
+          setState(() {
+            _activeTokenInfo = active;
+            _isCheckingActiveToken = false;
+          });
+        }
+      } catch (_) {
+        if (mounted) {
+          setState(() {
+            _isCheckingActiveToken = false;
+          });
+        }
       }
     } else {
       if (mounted) {
@@ -457,6 +479,20 @@ class _SelectDepartmentScreenState extends State<SelectDepartmentScreen> {
                           ],
                         ),
                       ),
+                      if (auth.currentUser?.role == 'admin') ...[
+                        _buildHeaderActionButton(
+                          icon: Icons.admin_panel_settings_rounded,
+                          tooltip: 'Staff Console',
+                          onTap: () {
+                            Navigator.of(context).pushReplacement(
+                              MaterialPageRoute(
+                                builder: (_) => const AdminDashboardScreen(),
+                              ),
+                            );
+                          },
+                        ),
+                        const SizedBox(width: 8),
+                      ],
                       _buildHeaderActionButton(
                         icon: Icons.history_rounded,
                         tooltip: 'Booking History',
@@ -493,16 +529,43 @@ class _SelectDepartmentScreenState extends State<SelectDepartmentScreen> {
                           _isCheckingActiveToken
                       ? const Center(child: CircularProgressIndicator())
                       : queue.departments.isEmpty
-                          ? const Center(
+                          ? Center(
                               child: Padding(
-                                padding: EdgeInsets.all(32.0),
-                                child: Text(
-                                  'No clinical departments available right now.',
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(
-                                    color: AppTheme.textSecondary,
-                                    fontSize: 15,
-                                  ),
+                                padding: const EdgeInsets.all(32.0),
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    const Icon(
+                                      Icons.apartment_outlined,
+                                      size: 48,
+                                      color: AppTheme.textSecondary,
+                                    ),
+                                    const SizedBox(height: 14),
+                                    const Text(
+                                      'No clinical departments available right now.',
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        color: AppTheme.textPrimary,
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 15,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 6),
+                                    const Text(
+                                      'Please ensure the clinic backend server is running.',
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        color: AppTheme.textSecondary,
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 18),
+                                    ElevatedButton.icon(
+                                      onPressed: _loadData,
+                                      icon: const Icon(Icons.refresh, size: 16),
+                                      label: const Text('Retry Connection'),
+                                    ),
+                                  ],
                                 ),
                               ),
                             )

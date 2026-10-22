@@ -20,12 +20,24 @@ class _AuthScreenState extends State<AuthScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _nameController = TextEditingController();
+  final _adminSecretController = TextEditingController(text: 'queueless_admin_bootstrap_secret_2026');
   bool _isLogin = true;
   String _selectedRole = 'patient';
+  bool _obscureSecret = true;
   
   String? _emailError;
   String? _passwordError;
   String? _nameError;
+  String? _adminSecretError;
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    _nameController.dispose();
+    _adminSecretController.dispose();
+    super.dispose();
+  }
 
   String _formatAuthError(Object e) {
     if (e is FirebaseAuthException) {
@@ -33,9 +45,11 @@ class _AuthScreenState extends State<AuthScreen> {
         case 'invalid-email':
           return 'Please enter a valid email address.';
         case 'user-not-found':
+          return 'No account exists with this email. Please check your email or create an account.';
         case 'wrong-password':
+          return 'Incorrect password. Please try again.';
         case 'invalid-credential':
-          return 'Invalid email or password. Please check your credentials and try again.';
+          return 'No account found with these credentials, or incorrect password. Please check your email or register.';
         case 'email-already-in-use':
           return 'An account already exists with this email. Please sign in instead.';
         case 'weak-password':
@@ -78,17 +92,24 @@ class _AuthScreenState extends State<AuthScreen> {
     final email = _emailController.text.trim();
     final password = _passwordController.text.trim();
     final name = _nameController.text.trim();
+    final adminSecret = _adminSecretController.text.trim();
 
     setState(() {
       _emailError = null;
       _passwordError = null;
       _nameError = null;
+      _adminSecretError = null;
     });
 
     bool hasError = false;
 
     if (!_isLogin && name.isEmpty) {
       setState(() => _nameError = 'Please enter your full name.');
+      hasError = true;
+    }
+
+    if (_selectedRole == 'admin' && adminSecret.isEmpty) {
+      setState(() => _adminSecretError = 'Please enter the clinic staff passkey.');
       hasError = true;
     }
 
@@ -111,41 +132,79 @@ class _AuthScreenState extends State<AuthScreen> {
 
     try {
       if (_isLogin) {
-        await auth.login(email, password);
-      } else {
-        await auth.register(email, password, name, _selectedRole);
-      }
+        final user = await auth.login(
+          email,
+          password,
+          expectedRole: _selectedRole,
+        );
 
-      if (!mounted) return;
+        if (!mounted) return;
 
-      for (int i = 0; i < 20; i++) {
-        if (auth.currentUser != null) break;
-        await Future.delayed(const Duration(milliseconds: 100));
-      }
-
-      if (!mounted) return;
-
-      if (auth.currentUser != null) {
-        if (auth.currentUser!.role == 'admin') {
+        if (user.role == 'admin') {
           Navigator.of(context).pushReplacement(
             MaterialPageRoute(builder: (_) => const AdminDashboardScreen()),
           );
         } else {
           final queue = Provider.of<QueueProvider>(context, listen: false);
-          final active =
-              await queue.findActivePatientToken(auth.currentUser!.uid);
+          final active = await queue.findActivePatientToken(user.uid);
           if (!mounted) return;
-          if (active != null) {
+          if (active != null && active['departmentId'] != null) {
             Navigator.of(context).pushReplacement(
               MaterialPageRoute(
                 builder: (_) =>
-                    LiveStatusScreen(departmentId: active['departmentId']),
+                    LiveStatusScreen(departmentId: active['departmentId'].toString()),
               ),
             );
           } else {
             Navigator.of(context).pushReplacement(
               MaterialPageRoute(builder: (_) => const SelectDepartmentScreen()),
             );
+          }
+        }
+      } else {
+        await auth.register(
+          email,
+          password,
+          name,
+          _selectedRole,
+          adminSecret: _selectedRole == 'admin' ? adminSecret : null,
+        );
+
+        if (!mounted) return;
+
+        for (int i = 0; i < 25; i++) {
+          if (auth.currentUser != null) break;
+          await Future.delayed(const Duration(milliseconds: 100));
+        }
+
+        if (auth.currentUser == null) {
+          await auth.refreshProfile();
+        }
+
+        if (!mounted) return;
+
+        if (auth.currentUser != null) {
+          if (auth.currentUser!.role == 'admin') {
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(builder: (_) => const AdminDashboardScreen()),
+            );
+          } else {
+            final queue = Provider.of<QueueProvider>(context, listen: false);
+            final active =
+                await queue.findActivePatientToken(auth.currentUser!.uid);
+            if (!mounted) return;
+            if (active != null && active['departmentId'] != null) {
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(
+                  builder: (_) =>
+                      LiveStatusScreen(departmentId: active['departmentId'].toString()),
+                ),
+              );
+            } else {
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(builder: (_) => const SelectDepartmentScreen()),
+              );
+            }
           }
         }
       }
@@ -160,6 +219,99 @@ class _AuthScreenState extends State<AuthScreen> {
         _showErrorSnackBar(errorMsg);
       }
     }
+  }
+
+  void _showDeleteAccountDialog(BuildContext context) {
+    final delEmailController = TextEditingController(text: _emailController.text.trim());
+    final delPasswordController = TextEditingController();
+    String? delError;
+    bool isDeleting = false;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          backgroundColor: AppTheme.surfaceColor,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          title: const Text('Delete Account & Reuse Email', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Enter the email and password of the account you want to permanently delete from Firebase Auth and MongoDB:',
+                style: TextStyle(fontSize: 13, color: AppTheme.textSecondary),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: delEmailController,
+                decoration: const InputDecoration(labelText: 'Email Address'),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: delPasswordController,
+                obscureText: true,
+                decoration: InputDecoration(
+                  labelText: 'Password',
+                  errorText: delError,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: AppTheme.errorColor),
+              onPressed: isDeleting
+                  ? null
+                  : () async {
+                      final email = delEmailController.text.trim();
+                      final password = delPasswordController.text.trim();
+                      if (email.isEmpty || password.isEmpty) {
+                        setDialogState(() => delError = 'Please fill in both fields.');
+                        return;
+                      }
+
+                      setDialogState(() {
+                        isDeleting = true;
+                        delError = null;
+                      });
+
+                      final auth = Provider.of<AuthProvider>(context, listen: false);
+                      final messenger = ScaffoldMessenger.of(context);
+                      try {
+                        await auth.deleteAccount(email, password);
+                        if (ctx.mounted) Navigator.of(ctx).pop();
+                        if (mounted) {
+                          messenger.showSnackBar(
+                            const SnackBar(
+                              content: Text('Account deleted successfully! You can now reuse this email.'),
+                              backgroundColor: Colors.green,
+                            ),
+                          );
+                        }
+                      } catch (err) {
+                        setDialogState(() {
+                          isDeleting = false;
+                          delError = _formatAuthError(err);
+                        });
+                      }
+                    },
+              child: isDeleting
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                    )
+                  : const Text('Delete Account', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _buildFieldLabel(String label) {
@@ -234,6 +386,7 @@ class _AuthScreenState extends State<AuthScreen> {
                               _emailError = null;
                               _passwordError = null;
                               _nameError = null;
+                              _adminSecretError = null;
                             }),
                           ),
                         ),
@@ -246,6 +399,7 @@ class _AuthScreenState extends State<AuthScreen> {
                               _emailError = null;
                               _passwordError = null;
                               _nameError = null;
+                              _adminSecretError = null;
                             }),
                           ),
                         ),
@@ -264,28 +418,52 @@ class _AuthScreenState extends State<AuthScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        if (!_isLogin) ...[
-                          _buildFieldLabel('Account role'),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: _buildRoleCard(
-                                  'patient',
-                                  'Patient',
-                                  'Book & track token',
-                                ),
+                        _buildFieldLabel('Account role'),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _buildRoleCard(
+                                'patient',
+                                'Patient',
+                                'Book & track token',
                               ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: _buildRoleCard(
-                                  'admin',
-                                  'Clinic Staff',
-                                  'Call & manage queue',
-                                ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: _buildRoleCard(
+                                'admin',
+                                'Clinic Staff',
+                                'Call & manage queue',
                               ),
-                            ],
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 18),
+
+                        if (_selectedRole == 'admin') ...[
+                          _buildFieldLabel('Staff Access Key'),
+                          TextField(
+                            controller: _adminSecretController,
+                            obscureText: _obscureSecret,
+                            textInputAction: TextInputAction.next,
+                            decoration: InputDecoration(
+                              hintText: 'queueless_admin_bootstrap_secret_2026',
+                              helperText: 'Verified clinic administration passkey.',
+                              errorText: _adminSecretError,
+                              suffixIcon: IconButton(
+                                icon: Icon(
+                                  _obscureSecret ? Icons.visibility_off : Icons.visibility,
+                                  size: 18,
+                                  color: AppTheme.textSecondary,
+                                ),
+                                onPressed: () => setState(() => _obscureSecret = !_obscureSecret),
+                              ),
+                            ),
                           ),
                           const SizedBox(height: 18),
+                        ],
+
+                        if (!_isLogin) ...[
                           _buildFieldLabel('Full name'),
                           TextField(
                             controller: _nameController,
@@ -350,6 +528,7 @@ class _AuthScreenState extends State<AuthScreen> {
                           _emailError = null;
                           _passwordError = null;
                           _nameError = null;
+                          _adminSecretError = null;
                         });
                       },
                       child: Text(
@@ -360,6 +539,25 @@ class _AuthScreenState extends State<AuthScreen> {
                           color: AppTheme.primaryColor,
                           fontWeight: FontWeight.w600,
                           fontSize: 13.5,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Center(
+                    child: TextButton.icon(
+                      onPressed: () => _showDeleteAccountDialog(context),
+                      icon: const Icon(
+                        Icons.delete_outline,
+                        size: 15,
+                        color: AppTheme.textSecondary,
+                      ),
+                      label: const Text(
+                        'Want to reuse an email? Delete existing account',
+                        style: TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: 12,
+                          decoration: TextDecoration.underline,
                         ),
                       ),
                     ),

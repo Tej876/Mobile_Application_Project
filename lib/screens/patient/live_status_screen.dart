@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../../providers/queue_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../models/queue_token.dart';
+import '../../models/department.dart';
 import '../../services/notification_service.dart';
 import '../../services/api_service.dart';
 import '../../theme/app_theme.dart';
@@ -25,6 +26,12 @@ class _LiveStatusScreenState extends State<LiveStatusScreen> {
   void initState() {
     super.initState();
     NotificationService().init();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final queue = Provider.of<QueueProvider>(context, listen: false);
+      if (queue.departments.isEmpty) {
+        queue.fetchDepartments();
+      }
+    });
   }
 
   String _formatTokenNum(int n) => '#${n.toString().padLeft(2, '0')}';
@@ -74,10 +81,18 @@ class _LiveStatusScreenState extends State<LiveStatusScreen> {
     final queue = Provider.of<QueueProvider>(context);
     final auth = Provider.of<AuthProvider>(context, listen: false);
 
-    final dept = queue.departments.firstWhere(
-      (d) => d.id == widget.departmentId,
-      orElse: () => queue.departments.first,
-    );
+    final Department dept;
+    if (queue.departments.any((d) => d.id == widget.departmentId)) {
+      dept = queue.departments.firstWhere((d) => d.id == widget.departmentId);
+    } else if (queue.departments.isNotEmpty) {
+      dept = queue.departments.first;
+    } else {
+      dept = Department(
+        id: widget.departmentId,
+        name: 'Clinical Department',
+        avgConsultationMins: 10,
+      );
+    }
 
     return Scaffold(
       body: SafeArea(

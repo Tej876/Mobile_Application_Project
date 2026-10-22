@@ -61,9 +61,48 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 720),
-            child: _selectedDepartmentId == null
+            child: (queue.isLoading && queue.departments.isEmpty)
                 ? const Center(child: CircularProgressIndicator())
-                : Column(
+                : queue.departments.isEmpty
+                    ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(24.0),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(
+                                Icons.apartment_outlined,
+                                size: 52,
+                                color: AppTheme.textSecondary,
+                              ),
+                              const SizedBox(height: 16),
+                              Text(
+                                'No Clinical Departments Available',
+                                style: Theme.of(context).textTheme.displayMedium,
+                                textAlign: TextAlign.center,
+                              ),
+                              const SizedBox(height: 8),
+                              const Text(
+                                'Connecting to clinic database. Tap retry to reload departments.',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(color: AppTheme.textSecondary),
+                              ),
+                              const SizedBox(height: 20),
+                              ElevatedButton.icon(
+                                onPressed: () async {
+                                  await queue.fetchDepartments();
+                                  if (queue.departments.isNotEmpty && mounted) {
+                                    _selectDepartment(queue.departments.first.id);
+                                  }
+                                },
+                                icon: const Icon(Icons.refresh, size: 18),
+                                label: const Text('Retry Connection'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                    : Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       // Staff Console Header (No eyebrow kicker per craft-floor.md)

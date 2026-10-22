@@ -107,10 +107,10 @@ class _SplashScreenState extends State<SplashScreen>
         final active = await queueProvider.findActivePatientToken(authProvider.currentUser!.uid);
         if (!mounted) return;
 
-        if (active != null) {
+        if (active != null && active['departmentId'] != null) {
           Navigator.of(context).pushReplacement(
             MaterialPageRoute(
-              builder: (_) => LiveStatusScreen(departmentId: active['departmentId']),
+              builder: (_) => LiveStatusScreen(departmentId: active['departmentId'].toString()),
             ),
           );
         } else {
