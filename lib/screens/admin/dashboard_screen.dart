@@ -246,12 +246,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                 child: _buildViewTab(
                                   label: 'Active Queue',
                                   index: 0,
+                                  queue: queue,
                                 ),
                               ),
                               Expanded(
                                 child: _buildViewTab(
                                   label: 'Activity Audit Log',
                                   index: 1,
+                                  queue: queue,
                                 ),
                               ),
                             ],
@@ -265,7 +267,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                       Expanded(
                         child: _currentIndex == 0
                             ? _buildQueueView(queue)
-                            : _buildActivityLogView(queue),
+                            : _buildActivityLogView(),
                       ),
                     ],
                   ),
@@ -275,10 +277,27 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
-  Widget _buildViewTab({required String label, required int index}) {
+  Widget _buildViewTab({
+    required String label,
+    required int index,
+    required QueueProvider queue,
+  }) {
     final selected = _currentIndex == index;
     return GestureDetector(
-      onTap: () => setState(() => _currentIndex = index),
+      onTap: () {
+        if (selected) return;
+        setState(() {
+          _currentIndex = index;
+          final departmentId = _selectedDepartmentId;
+          if (departmentId == null) return;
+
+          if (index == 0) {
+            _adminQueueStream = queue.listenToAdminQueue(departmentId);
+          } else {
+            _activityLogStream = queue.listenToActivityLog(departmentId);
+          }
+        });
+      },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 160),
         padding: const EdgeInsets.symmetric(vertical: 9),
@@ -303,13 +322,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   }
 
   Widget _buildQueueView(QueueProvider queue) {
-    final stream = _adminQueueStream ??
-        (_selectedDepartmentId != null
-            ? queue.listenToAdminQueue(_selectedDepartmentId!)
-            : null);
-
     return StreamBuilder<List<QueueToken>>(
-      stream: stream,
+      stream: _adminQueueStream,
       builder: (streamCtx, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
           return const Center(child: CircularProgressIndicator());
@@ -531,14 +545,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
-  Widget _buildActivityLogView(QueueProvider queue) {
-    final stream = _activityLogStream ??
-        (_selectedDepartmentId != null
-            ? queue.listenToActivityLog(_selectedDepartmentId!)
-            : null);
-
+  Widget _buildActivityLogView() {
     return StreamBuilder<List<ActivityLog>>(
-      stream: stream,
+      stream: _activityLogStream,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
           return const Center(child: CircularProgressIndicator());
@@ -647,4 +656,3 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 }
-

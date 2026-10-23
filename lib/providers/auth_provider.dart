@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../models/app_user.dart';
 import '../services/api_service.dart';
+import '../services/profile_sync.dart';
 import '../services/socket_service.dart';
 
 class AuthProvider extends ChangeNotifier {
@@ -13,24 +14,24 @@ class AuthProvider extends ChangeNotifier {
   AppUser? get currentUser => _currentUser;
   bool _isLoading = true;
   bool get isLoading => _isLoading;
-  bool _isRegistering = false;
+  bool _isAuthOperationInProgress = false;
 
   AuthProvider() {
     try {
       _auth.authStateChanges().listen((User? user) async {
-        if (_isRegistering) return; // Let register() complete its sync first
+        if (_isAuthOperationInProgress) return;
         _isLoading = true;
         notifyListeners();
 
         if (user != null) {
+          _currentUser = null;
           try {
             await _fetchUserData(user.uid);
             await _socketService.connect();
           } catch (e) {
-            // User exists in Firebase session but not in MongoDB!
-            debugPrint("⚠️ [AuthProvider] User not found in MongoDB: $e");
-            await _auth.signOut();
-            _currentUser = null;
+            debugPrint(
+              "⚠️ [AuthProvider] Could not load MongoDB user profile: $e",
+            );
             _socketService.disconnect();
           }
         } else {
@@ -58,18 +59,7 @@ class AuthProvider extends ChangeNotifier {
   Future<void> _fetchUserData(String uid) async {
     try {
       final res = await _api.get('/api/users/me');
-      if (res is Map && res['user'] != null) {
-        _currentUser = AppUser.fromJson(
-          Map<String, dynamic>.from(res['user']),
-          defaultUid: uid,
-        );
-      } else {
-        _currentUser = null;
-        final msg = (res is Map && res['message'] != null)
-            ? res['message'].toString()
-            : 'No account found in MongoDB database for this user. Please register first.';
-        throw Exception(msg);
-      }
+      _setUserFromResponse(res, uid);
     } catch (e) {
       _currentUser = null;
       debugPrint("⚠️ [AuthProvider] Error fetching MongoDB user data: $e");
@@ -77,18 +67,27 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  /// Registers user in Firebase Auth and synchronizes MongoDB user profile
-  /// Note: Admin role is verified via adminSecret bootstrap mechanism
-  Future<void> register(
-    String email,
-    String password,
-    String name,
-    String role, {
-    String? adminSecret,
-  }) async {
+  void _setUserFromResponse(dynamic response, String uid) {
+    if (response is Map && response['user'] is Map) {
+      _currentUser = AppUser.fromJson(
+        Map<String, dynamic>.from(response['user']),
+        defaultUid: uid,
+      );
+      return;
+    }
+
+    _currentUser = null;
+    final message = response is Map && response['message'] != null
+        ? response['message'].toString()
+        : 'The backend did not return a user profile.';
+    throw Exception(message);
+  }
+
+  /// Registers a Firebase account and synchronizes its MongoDB profile.
+  Future<void> register(String email, String password, String name) async {
     try {
       _isLoading = true;
-      _isRegistering = true;
+      _isAuthOperationInProgress = true;
       notifyListeners();
 
       UserCredential cred = await _auth.createUserWithEmailAndPassword(
@@ -97,21 +96,7 @@ class AuthProvider extends ChangeNotifier {
       );
 
       if (cred.user != null) {
-        // Sync profile to MongoDB backend
-        final effectiveSecret = role == 'admin'
-            ? (adminSecret != null && adminSecret.isNotEmpty
-                ? adminSecret
-                : 'queueless_admin_bootstrap_secret_2026')
-            : null;
-
-        final payload = <String, dynamic>{
-          'name': name,
-          'email': email,
-          'role': role,
-        };
-        if (effectiveSecret != null) {
-          payload['adminSecret'] = effectiveSecret;
-        }
+        final payload = <String, dynamic>{'name': name};
 
         final res = await _api.post('/api/users/me', payload);
 
@@ -129,7 +114,7 @@ class AuthProvider extends ChangeNotifier {
     } catch (e) {
       rethrow;
     } finally {
-      _isRegistering = false;
+      _isAuthOperationInProgress = false;
       _isLoading = false;
       notifyListeners();
     }
@@ -144,6 +129,8 @@ class AuthProvider extends ChangeNotifier {
   }) async {
     try {
       _isLoading = true;
+      _isAuthOperationInProgress = true;
+      _currentUser = null;
       notifyListeners();
 
       UserCredential cred = await _auth.signInWithEmailAndPassword(
@@ -152,29 +139,24 @@ class AuthProvider extends ChangeNotifier {
       );
 
       if (cred.user != null) {
-        try {
-          await _fetchUserData(cred.user!.uid);
-        } catch (fetchErr) {
-          // User exists in Firebase Auth but NOT in MongoDB
-          await _auth.signOut();
-          _currentUser = null;
-          _socketService.disconnect();
-          throw Exception(
-            'No account found for this user in MongoDB database. Please create an account first.',
-          );
-        }
+        final user = cred.user!;
+        final profileResponse = await fetchProfileWithPatientRecovery(
+          fetchProfile: () => _api.get('/api/users/me'),
+          recoverPatientProfile: () => _api.post('/api/users/me/recover', {
+            'name': user.displayName?.trim().isNotEmpty == true
+                ? user.displayName!.trim()
+                : (user.email?.split('@').first ?? 'Patient'),
+          }),
+          allowPatientRecovery: expectedRole == 'patient',
+        );
+        _setUserFromResponse(profileResponse, user.uid);
 
         if (_currentUser == null) {
-          await _auth.signOut();
-          _socketService.disconnect();
-          throw Exception(
-            'No account found for this user in MongoDB database. Please create an account first.',
-          );
+          throw Exception('The backend did not return a user profile.');
         }
 
         final actualRole = _currentUser!.role;
         if (expectedRole == 'admin' && actualRole != 'admin') {
-          // Patient account attempting to sign in at Clinic Staff console
           await _auth.signOut();
           _currentUser = null;
           _socketService.disconnect();
@@ -182,7 +164,6 @@ class AuthProvider extends ChangeNotifier {
             'This account is registered as a Patient. Please select "Patient" to sign in.',
           );
         } else if (expectedRole == 'patient' && actualRole == 'admin') {
-          // Admin account attempting to sign in at Patient portal
           await _auth.signOut();
           _currentUser = null;
           _socketService.disconnect();
@@ -198,6 +179,7 @@ class AuthProvider extends ChangeNotifier {
     } catch (e) {
       rethrow;
     } finally {
+      _isAuthOperationInProgress = false;
       _isLoading = false;
       notifyListeners();
     }

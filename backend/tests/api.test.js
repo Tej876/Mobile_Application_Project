@@ -81,6 +81,74 @@ describe('QueueLess Backend Integration Tests', () => {
       const res = await request(app).get('/api/users/me');
       expect(res.status).toBe(401);
     });
+
+    test('Firebase account with no MongoDB profile can recover as a patient', async () => {
+      const uid = 'firebase-only-patient-456';
+      const token = `mock-${uid}`;
+
+      const missingRes = await request(app)
+        .get('/api/users/me')
+        .set('Authorization', `Bearer ${token}`);
+
+      expect(missingRes.status).toBe(404);
+
+      const recoveryRes = await request(app)
+        .post('/api/users/me/recover')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          name: 'Recovered Patient',
+          firebaseUid: 'client-supplied-uid',
+          email: 'client-supplied@example.com',
+          role: 'admin',
+        });
+
+      expect(recoveryRes.status).toBe(201);
+      expect(recoveryRes.body.user.firebaseUid).toBe(uid);
+      expect(recoveryRes.body.user.email).toBe('patient@queueless.test');
+      expect(recoveryRes.body.user.name).toBe('Recovered Patient');
+      expect(recoveryRes.body.user.role).toBe('patient');
+
+      const storedUser = await User.findOne({ firebaseUid: uid });
+      expect(storedUser).not.toBeNull();
+      expect(storedUser.role).toBe('patient');
+    });
+
+    test('recovery is idempotent and preserves an existing profile', async () => {
+      const uid = 'firebase-only-patient-repeat';
+      const token = `mock-${uid}`;
+      const endpoint = () =>
+        request(app)
+          .post('/api/users/me/recover')
+          .set('Authorization', `Bearer ${token}`)
+          .send({ name: 'First Recovery Name' });
+
+      const firstRes = await endpoint();
+      const secondRes = await endpoint();
+
+      expect(firstRes.status).toBe(201);
+      expect(secondRes.status).toBe(200);
+      expect(secondRes.body.user.id).toBe(firstRes.body.user.id);
+      expect(secondRes.body.user.name).toBe('First Recovery Name');
+      expect(await User.countDocuments({ firebaseUid: uid })).toBe(1);
+    });
+
+    test('temporary MongoDB failure remains a server error, not a missing-profile response', async () => {
+      const findOne = jest
+        .spyOn(User, 'findOne')
+        .mockResolvedValueOnce(null)
+        .mockRejectedValueOnce(new Error('temporary database failure'));
+
+      try {
+        const res = await request(app)
+          .get('/api/users/me')
+          .set('Authorization', `Bearer ${patientToken}`);
+
+        expect(res.status).toBe(500);
+        expect(res.status).not.toBe(404);
+      } finally {
+        findOne.mockRestore();
+      }
+    });
   });
 
   describe('Departments API', () => {

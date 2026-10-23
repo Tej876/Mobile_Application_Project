@@ -130,7 +130,7 @@ describe('QueueLess Concurrency, Security & Extended API Tests', () => {
   // 2. AUTHENTICATION, AUTHORIZATION & SECURITY TESTS
   // =========================================================================
   describe('Authentication, Authorization & Role Security [AUTH-SEC]', () => {
-    test('[AUTH-SEC-01] Patient cannot self-escalate role to admin without bootstrap secret', async () => {
+    test('[AUTH-SEC-01] Client profile sync cannot self-assign the admin role', async () => {
       const res = await request(app)
         .post('/api/users/me')
         .set('Authorization', `Bearer ${patientToken}`)
@@ -148,7 +148,7 @@ describe('QueueLess Concurrency, Security & Extended API Tests', () => {
       expect(userInDb.role).toBe('patient');
     });
 
-    test('[AUTH-SEC-02] Patient providing invalid bootstrap secret cannot elevate to admin', async () => {
+    test('[AUTH-SEC-02] Client-supplied admin secret cannot elevate a profile', async () => {
       const res = await request(app)
         .post('/api/users/me')
         .set('Authorization', `Bearer ${patientToken}`)
@@ -166,25 +166,53 @@ describe('QueueLess Concurrency, Security & Extended API Tests', () => {
       expect(userInDb.role).toBe('patient');
     });
 
-    test('[AUTH-SEC-03] Legitimate admin provisioning succeeds with valid bootstrap secret', async () => {
+    test('[AUTH-SEC-03] Client profile sync cannot provision an admin', async () => {
       const newAdminUid = 'bootstrap-admin-007';
-      const bootstrapSecret = process.env.ADMIN_BOOTSTRAP_SECRET || 'queueless_admin_bootstrap_secret_2026';
 
       const res = await request(app)
         .post('/api/users/me')
         .set('Authorization', `Bearer mock-${newAdminUid}`)
         .send({
           name: 'Legit Admin',
-          email: 'newadmin@queueless.test',
           role: 'admin',
-          adminSecret: bootstrapSecret,
+          adminSecret: 'client-supplied-secret',
         });
 
       expect(res.status).toBe(201);
-      expect(res.body.user.role).toBe('admin');
+      expect(res.body.user.role).toBe('patient');
 
       const userInDb = await User.findOne({ firebaseUid: newAdminUid });
-      expect(userInDb.role).toBe('admin');
+      expect(userInDb.role).toBe('patient');
+    });
+
+    test('unverified JWT payloads are rejected', async () => {
+      const payload = Buffer.from(
+        JSON.stringify({ sub: 'forged-user-id', email: 'forged@example.com' })
+      ).toString('base64url');
+      const token = `e30.${payload}.signature`;
+
+      const res = await request(app)
+        .get('/api/users/me')
+        .set('Authorization', `Bearer ${token}`);
+
+      expect(res.status).toBe(401);
+    });
+
+    test('concurrent patient recovery creates exactly one profile', async () => {
+      const uid = 'concurrent-recovery-patient';
+      const token = `mock-${uid}`;
+      const recover = () =>
+        request(app)
+          .post('/api/users/me/recover')
+          .set('Authorization', `Bearer ${token}`)
+          .send({ name: 'Recovered Patient' });
+
+      const results = await Promise.all([recover(), recover()]);
+
+      expect(results.map((result) => result.status).sort()).toEqual([200, 201]);
+      expect(results[0].body.user.id).toBe(results[1].body.user.id);
+      expect(await User.countDocuments({ firebaseUid: uid })).toBe(1);
+      expect((await User.findOne({ firebaseUid: uid })).role).toBe('patient');
     });
 
     test('[AUTH-SEC-04] Request with empty Bearer token receives HTTP 401 Unauthorized', async () => {

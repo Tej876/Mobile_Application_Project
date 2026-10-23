@@ -18,6 +18,7 @@ class QueueProvider extends ChangeNotifier {
 
   List<QueueToken> _adminQueue = [];
   List<QueueToken> get adminQueue => _adminQueue;
+  final Map<String, Future<void> Function()> _adminQueueRefreshers = {};
 
   List<QueueToken> _bookingHistory = [];
   List<QueueToken> get bookingHistory => _bookingHistory;
@@ -259,6 +260,7 @@ class QueueProvider extends ChangeNotifier {
   Stream<List<QueueToken>> listenToAdminQueue(String departmentId) {
     late StreamController<List<QueueToken>> controller;
     final List<StreamSubscription> subscriptions = [];
+    Future<void> Function()? refreshQueue;
 
     controller = StreamController<List<QueueToken>>(
       onListen: () async {
@@ -285,7 +287,10 @@ class QueueProvider extends ChangeNotifier {
           }
         }
 
+        refreshQueue = fetchQueue;
+        _adminQueueRefreshers[departmentId] = fetchQueue;
         await fetchQueue();
+        if (controller.isClosed) return;
 
         subscriptions.add(_socket.onQueueUpdated.listen((_) => fetchQueue()));
         subscriptions.add(_socket.onTokenCreated.listen((_) => fetchQueue()));
@@ -294,6 +299,9 @@ class QueueProvider extends ChangeNotifier {
         subscriptions.add(_socket.onTokenCompleted.listen((_) => fetchQueue()));
       },
       onCancel: () {
+        if (identical(_adminQueueRefreshers[departmentId], refreshQueue)) {
+          _adminQueueRefreshers.remove(departmentId);
+        }
         for (var sub in subscriptions) {
           sub.cancel();
         }
@@ -312,6 +320,8 @@ class QueueProvider extends ChangeNotifier {
 
     controller = StreamController<List<ActivityLog>>(
       onListen: () async {
+        _socket.joinDepartment(departmentId);
+
         Future<void> fetchLogs() async {
           if (controller.isClosed) return;
           try {
@@ -333,6 +343,7 @@ class QueueProvider extends ChangeNotifier {
         }
 
         await fetchLogs();
+        if (controller.isClosed) return;
 
         subscriptions.add(_socket.onQueueUpdated.listen((_) => fetchLogs()));
         subscriptions.add(_socket.onTokenCompleted.listen((_) => fetchLogs()));
@@ -342,6 +353,7 @@ class QueueProvider extends ChangeNotifier {
         for (var sub in subscriptions) {
           sub.cancel();
         }
+        _socket.leaveDepartment(departmentId);
         controller.close();
       },
     );
@@ -353,6 +365,7 @@ class QueueProvider extends ChangeNotifier {
   Future<void> callNextPatient(String departmentId) async {
     try {
       await _api.patch('/api/admin/queues/$departmentId/call-next');
+      await _refreshAdminQueue(departmentId);
       notifyListeners();
     } catch (e) {
       debugPrint("⚠️ [QueueProvider] Error calling next patient: $e");
@@ -372,10 +385,15 @@ class QueueProvider extends ChangeNotifier {
           : '/api/admin/queues/${token.id}/complete';
 
       await _api.patch(endpoint);
+      await _refreshAdminQueue(departmentId);
       notifyListeners();
     } catch (e) {
       debugPrint("⚠️ [QueueProvider] Error marking token done: $e");
       rethrow;
     }
+  }
+
+  Future<void> _refreshAdminQueue(String departmentId) async {
+    await _adminQueueRefreshers[departmentId]?.call();
   }
 }

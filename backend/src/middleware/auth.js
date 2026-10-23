@@ -38,28 +38,10 @@ async function verifyToken(req, res, next) {
       try {
         decodedToken = await admin.auth().verifyIdToken(token);
       } catch (authErr) {
-        // Development fallback: decode JWT payload if public certificate lookup times out
-        try {
-          const parts = token.split('.');
-          if (parts.length === 3) {
-            const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'));
-            if (payload && (payload.user_id || payload.sub)) {
-              console.warn(`ℹ️ [verifyToken] Recovered user identity from decoded JWT: ${payload.user_id || payload.sub}`);
-              decodedToken = {
-                uid: payload.user_id || payload.sub,
-                email: payload.email || '',
-                name: payload.name || 'User',
-              };
-            }
-          }
-        } catch (_) {}
-
-        if (!decodedToken) {
-          return res.status(401).json({
-            error: 'Unauthorized',
-            message: `Invalid or expired Firebase ID token: ${authErr.message}`,
-          });
-        }
+        return res.status(401).json({
+          error: 'Unauthorized',
+          message: `Invalid or expired Firebase ID token: ${authErr.message}`,
+        });
       }
     }
 

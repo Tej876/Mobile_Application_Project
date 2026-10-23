@@ -20,22 +20,18 @@ class _AuthScreenState extends State<AuthScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _nameController = TextEditingController();
-  final _adminSecretController = TextEditingController(text: 'queueless_admin_bootstrap_secret_2026');
   bool _isLogin = true;
   String _selectedRole = 'patient';
-  bool _obscureSecret = true;
-  
+
   String? _emailError;
   String? _passwordError;
   String? _nameError;
-  String? _adminSecretError;
 
   @override
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
     _nameController.dispose();
-    _adminSecretController.dispose();
     super.dispose();
   }
 
@@ -92,24 +88,17 @@ class _AuthScreenState extends State<AuthScreen> {
     final email = _emailController.text.trim();
     final password = _passwordController.text.trim();
     final name = _nameController.text.trim();
-    final adminSecret = _adminSecretController.text.trim();
 
     setState(() {
       _emailError = null;
       _passwordError = null;
       _nameError = null;
-      _adminSecretError = null;
     });
 
     bool hasError = false;
 
     if (!_isLogin && name.isEmpty) {
       setState(() => _nameError = 'Please enter your full name.');
-      hasError = true;
-    }
-
-    if (_selectedRole == 'admin' && adminSecret.isEmpty) {
-      setState(() => _adminSecretError = 'Please enter the clinic staff passkey.');
       hasError = true;
     }
 
@@ -122,7 +111,9 @@ class _AuthScreenState extends State<AuthScreen> {
       setState(() => _passwordError = 'Please enter your password.');
       hasError = true;
     } else if (password.length < 6) {
-      setState(() => _passwordError = 'Password must be at least 6 characters long.');
+      setState(
+        () => _passwordError = 'Password must be at least 6 characters long.',
+      );
       hasError = true;
     }
 
@@ -151,8 +142,9 @@ class _AuthScreenState extends State<AuthScreen> {
           if (active != null && active['departmentId'] != null) {
             Navigator.of(context).pushReplacement(
               MaterialPageRoute(
-                builder: (_) =>
-                    LiveStatusScreen(departmentId: active['departmentId'].toString()),
+                builder: (_) => LiveStatusScreen(
+                  departmentId: active['departmentId'].toString(),
+                ),
               ),
             );
           } else {
@@ -162,13 +154,7 @@ class _AuthScreenState extends State<AuthScreen> {
           }
         }
       } else {
-        await auth.register(
-          email,
-          password,
-          name,
-          _selectedRole,
-          adminSecret: _selectedRole == 'admin' ? adminSecret : null,
-        );
+        await auth.register(email, password, name);
 
         if (!mounted) return;
 
@@ -190,19 +176,23 @@ class _AuthScreenState extends State<AuthScreen> {
             );
           } else {
             final queue = Provider.of<QueueProvider>(context, listen: false);
-            final active =
-                await queue.findActivePatientToken(auth.currentUser!.uid);
+            final active = await queue.findActivePatientToken(
+              auth.currentUser!.uid,
+            );
             if (!mounted) return;
             if (active != null && active['departmentId'] != null) {
               Navigator.of(context).pushReplacement(
                 MaterialPageRoute(
-                  builder: (_) =>
-                      LiveStatusScreen(departmentId: active['departmentId'].toString()),
+                  builder: (_) => LiveStatusScreen(
+                    departmentId: active['departmentId'].toString(),
+                  ),
                 ),
               );
             } else {
               Navigator.of(context).pushReplacement(
-                MaterialPageRoute(builder: (_) => const SelectDepartmentScreen()),
+                MaterialPageRoute(
+                  builder: (_) => const SelectDepartmentScreen(),
+                ),
               );
             }
           }
@@ -222,7 +212,9 @@ class _AuthScreenState extends State<AuthScreen> {
   }
 
   void _showDeleteAccountDialog(BuildContext context) {
-    final delEmailController = TextEditingController(text: _emailController.text.trim());
+    final delEmailController = TextEditingController(
+      text: _emailController.text.trim(),
+    );
     final delPasswordController = TextEditingController();
     String? delError;
     bool isDeleting = false;
@@ -232,8 +224,13 @@ class _AuthScreenState extends State<AuthScreen> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) => AlertDialog(
           backgroundColor: AppTheme.surfaceColor,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-          title: const Text('Delete Account & Reuse Email', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+          title: const Text(
+            'Delete Account & Reuse Email',
+            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+          ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -264,14 +261,18 @@ class _AuthScreenState extends State<AuthScreen> {
               child: const Text('Cancel'),
             ),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: AppTheme.errorColor),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.errorColor,
+              ),
               onPressed: isDeleting
                   ? null
                   : () async {
                       final email = delEmailController.text.trim();
                       final password = delPasswordController.text.trim();
                       if (email.isEmpty || password.isEmpty) {
-                        setDialogState(() => delError = 'Please fill in both fields.');
+                        setDialogState(
+                          () => delError = 'Please fill in both fields.',
+                        );
                         return;
                       }
 
@@ -280,7 +281,10 @@ class _AuthScreenState extends State<AuthScreen> {
                         delError = null;
                       });
 
-                      final auth = Provider.of<AuthProvider>(context, listen: false);
+                      final auth = Provider.of<AuthProvider>(
+                        context,
+                        listen: false,
+                      );
                       final messenger = ScaffoldMessenger.of(context);
                       try {
                         await auth.deleteAccount(email, password);
@@ -288,7 +292,9 @@ class _AuthScreenState extends State<AuthScreen> {
                         if (mounted) {
                           messenger.showSnackBar(
                             const SnackBar(
-                              content: Text('Account deleted successfully! You can now reuse this email.'),
+                              content: Text(
+                                'Account deleted successfully! You can now reuse this email.',
+                              ),
                               backgroundColor: Colors.green,
                             ),
                           );
@@ -304,9 +310,15 @@ class _AuthScreenState extends State<AuthScreen> {
                   ? const SizedBox(
                       width: 16,
                       height: 16,
-                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                      child: CircularProgressIndicator(
+                        color: Colors.white,
+                        strokeWidth: 2,
+                      ),
                     )
-                  : const Text('Delete Account', style: TextStyle(color: Colors.white)),
+                  : const Text(
+                      'Delete Account',
+                      style: TextStyle(color: Colors.white),
+                    ),
             ),
           ],
         ),
@@ -338,7 +350,10 @@ class _AuthScreenState extends State<AuthScreen> {
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 420),
             child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 36.0),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 24.0,
+                vertical: 36.0,
+              ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -355,14 +370,14 @@ class _AuthScreenState extends State<AuthScreen> {
                   Text(
                     _isLogin
                         ? 'Sign in to your clinic pass'
-                        : 'Create your clinic account',
+                        : 'Create your patient account',
                     style: Theme.of(context).textTheme.displayMedium,
                   ),
                   const SizedBox(height: 6),
                   Text(
                     _isLogin
                         ? 'Check live department wait times or manage patient dispatch.'
-                        : 'Register once as a patient or staff member to join or manage queues.',
+                        : 'Create a patient account to join and track queues.',
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
                   const SizedBox(height: 24),
@@ -386,7 +401,6 @@ class _AuthScreenState extends State<AuthScreen> {
                               _emailError = null;
                               _passwordError = null;
                               _nameError = null;
-                              _adminSecretError = null;
                             }),
                           ),
                         ),
@@ -396,10 +410,10 @@ class _AuthScreenState extends State<AuthScreen> {
                             selected: !_isLogin,
                             onTap: () => setState(() {
                               _isLogin = false;
+                              _selectedRole = 'patient';
                               _emailError = null;
                               _passwordError = null;
                               _nameError = null;
-                              _adminSecretError = null;
                             }),
                           ),
                         ),
@@ -418,45 +432,40 @@ class _AuthScreenState extends State<AuthScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        _buildFieldLabel('Account role'),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: _buildRoleCard(
-                                'patient',
-                                'Patient',
-                                'Book & track token',
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: _buildRoleCard(
-                                'admin',
-                                'Clinic Staff',
-                                'Call & manage queue',
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 18),
-
-                        if (_selectedRole == 'admin') ...[
-                          _buildFieldLabel('Staff Access Key'),
-                          TextField(
-                            controller: _adminSecretController,
-                            obscureText: _obscureSecret,
-                            textInputAction: TextInputAction.next,
-                            decoration: InputDecoration(
-                              hintText: 'queueless_admin_bootstrap_secret_2026',
-                              helperText: 'Verified clinic administration passkey.',
-                              errorText: _adminSecretError,
-                              suffixIcon: IconButton(
-                                icon: Icon(
-                                  _obscureSecret ? Icons.visibility_off : Icons.visibility,
-                                  size: 18,
-                                  color: AppTheme.textSecondary,
+                        if (_isLogin) ...[
+                          _buildFieldLabel('Account role'),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: _buildRoleCard(
+                                  'patient',
+                                  'Patient',
+                                  'Book & track token',
                                 ),
-                                onPressed: () => setState(() => _obscureSecret = !_obscureSecret),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: _buildRoleCard(
+                                  'admin',
+                                  'Clinic Staff',
+                                  'Call & manage queue',
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 18),
+                        ] else ...[
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: AppTheme.surfaceMuted,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Text(
+                              'Admin accounts must be provisioned by an authorized operator. Contact your administrator for access.',
+                              style: TextStyle(
+                                color: AppTheme.textSecondary,
+                                fontSize: 13,
                               ),
                             ),
                           ),
@@ -511,9 +520,7 @@ class _AuthScreenState extends State<AuthScreen> {
                                     strokeWidth: 2,
                                   ),
                                 )
-                              : Text(
-                                  _isLogin ? 'Sign in' : 'Create account',
-                                ),
+                              : Text(_isLogin ? 'Sign in' : 'Create account'),
                         ),
                       ],
                     ),
@@ -528,12 +535,12 @@ class _AuthScreenState extends State<AuthScreen> {
                           _emailError = null;
                           _passwordError = null;
                           _nameError = null;
-                          _adminSecretError = null;
+                          if (!_isLogin) _selectedRole = 'patient';
                         });
                       },
                       child: Text(
                         _isLogin
-                            ? 'First visit? Create a patient or staff account →'
+                            ? 'First visit? Create a patient account →'
                             : 'Already registered? Sign in to your account →',
                         style: const TextStyle(
                           color: AppTheme.primaryColor,
@@ -601,11 +608,7 @@ class _AuthScreenState extends State<AuthScreen> {
     );
   }
 
-  Widget _buildRoleCard(
-    String role,
-    String title,
-    String subtitle,
-  ) {
+  Widget _buildRoleCard(String role, String title, String subtitle) {
     final isSelected = _selectedRole == role;
 
     return GestureDetector(
@@ -670,4 +673,3 @@ class _AuthScreenState extends State<AuthScreen> {
     );
   }
 }
-
